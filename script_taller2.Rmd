@@ -1,0 +1,137 @@
+---
+title: "script_taller2"
+output: null
+date: "2025-03-19"
+---
+
+```{r}
+raw_data_path <- '../taller_2_bdml/raw_data'
+
+# Datos training
+hogares_tr <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
+personas_tr <- read.csv(file.path(raw_data_path, 'train_personas.csv'))
+
+# Datos test
+hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
+personas_te <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
+```
+```{r}
+# Tabla training
+bd_train <- personas_tr %>%
+  left_join(hogares_tr, join_by("id", "Clase", "Dominio", "Fex_c", "Depto", "Fex_dpto"))
+
+# Tabla test
+bd_test <- personas_te %>%
+  left_join(hogares_te, join_by("id", "Clase", "Dominio", "Fex_c", "Depto", "Fex_dpto"))
+```
+Selección de columnas para datos de entrenamiento
+```{r}
+bd_train <- bd_train %>%
+  select(
+    # Variables principales
+    "id",
+    "Clase",
+    "Dominio", # Ciudad
+    "Depto",
+    #"Estrato1", # No está en test
+    "Nper", # Número de personas en el hogar
+    "Npersug", # Número de personas por unidad de gasto
+    "P6020", # Sexo 1 hombre, 2 mujer
+    "P6040", # Edad
+    "P6090", # Cotizante en salud
+    "P6100", # Tipo de regimen de SS en salud
+    "P6210", # Nivel educativo
+    "P6210s1", # Grado escolar aprobado
+    "Oficio", # Tipo de ocupación
+    "P6430", # Cargo desempeñado en el trabajo
+    "Oc", # Ocupado 1
+    "Ina", # Inactivo 1
+    "Lp", # Línea de pobreza
+    
+    "Pobre", # Pobre 1, de lo contrario 0 (Variable dependiente en training)
+    "Ingtotug", # Ingreso per capita de la unidad de gasto (hogar) (Variable dependiente en training)
+    
+    # Variables secundarias
+    #"Ingtot", # Ingreso total # No está en test
+    #"Impa", # Ingreso primera actividad # No está en test
+    #"Impaes", # Ingreso primera actividad imputado # No está en test
+    #"Isa", # Ingreso segunda actividad # No está en test
+    #"Isaes", # Ingreso segunda actividad # No está en test
+    #"Ie", # Ingreso en especie # No está en test
+    #"Iees", # Ingreso en especie imputado # No está en test
+    #"Imdi", # Ingreso de desempleados e inactivos # No está en test
+    #"Imdies", # Ingreso de desempleados e inactivos imputado # No está en test
+    #"Iof1", # Ingreso por intereses y dividendos # No está en test
+    #"Iof1es", # Ingreso por intereses y dividendos imputado # No está en test
+    #"Iof2", # Ingreso por pensión # No está en test
+    #"Iof2es", # Ingreso por pensión imputado # No está en test
+    #"Iof3h", # Ingreso por ayudas de hogares # No está en test
+    #"Iof3hes", # Ingreso por ayudas de hogares imputado # No está en test
+    #"Iof3i", # Ingreso por instituciones # No está en test
+    #"Iof3ies", # Ingreso por instituciones imputado # No está en test
+    #"Iof6", # Ingreso por arriendos # No está en test
+    #"Iof6es", # Ingreso por arriendos imputado # No está en test
+    
+    # Variables terciarias (en test aparecen las dicótomas sobre si recibe o no ingresos por los siguientes conceptos)
+    #"P6500", # Ingresos recibidos # No está en test
+    #"P6510s1", # Ingresos por horas extras # No está en test
+    #"P6510s2", # Reportó o no el ingreso por horas extras # No está en test
+    #"P6545s1", # Ingresos por primas # No está en test
+    #"P6545s2", # Reportó o no el ingreso por primas # No está en test
+    #"P6580s1", # Ingresos por bonificaciones      # No está en test
+    #"P6580s2", # Reportó o no el ingreso por bonificaciones # No está en test
+    #"P6585s1a1", # Subsidio de alimentación # No está en test
+    #"P6585s1a2", # Reportó o no el subsidio de alimentación # No está en test
+    #"P6585s2a1", # Auxilio de transporte  # No está en test
+    #"P6585s2a2", # Reportó o no el auxilio de transporte # No está en test
+    #"P6585s3a1", # Subsidio familiar    # No está en test
+    #"P6585s3a2", # Reportó o no el subsidio familiar # No está en test
+    #"P6585s4a1", # Subsidio educativo    # No está en test
+    #"P6585s4a2", # Reportó o no el subsidio educativo # No está en test
+    #"P6590s1", # Pago en especie con alimentos # No está en test
+    #"P6600s1", # Pago en especie con vivienda # No está en test
+    #"P6610s1", # Valor estimado de transporte prestado por la empresa # No está en test
+    #"P6620s1", # Valor de pagos en especie con otros elementos # No está en test
+    #"P6630s1a1", # Valor prima de servicios ultimos 12 meses # No está en test
+    #"P6630s2a1", # Valor prima de navidad últimos 12 meses # No está en test
+    #"P6630s3a1", # Valor prima de vacaciones últimos 12 meses # No está en test
+    #"P6630s4a1", # Valor de los viaticos permanentes últimos 12 meses # No está en test
+    #"P6630s6a1", # Valor de las bonificaciones anuales # No está en test
+    #"P6750", # Ganancia neta del negocio # No está en test
+    #"P6760", # Cantidad de meses a los que corresponde ese ingreso # No está en test
+    #"P6870", # Cantidad de personas en la empresa # No está en test
+    #"P6920", # Cotiza a fondo de pensiones # No está en test
+    #"P7070", # Ingresos por segundo trabajo # No está en test
+    #"P7500s1a1", # Ingresos recibidos por arriendos # No está en test
+    #"P7500s2a1", # Ingresos por pensiones # No está en test
+    #"P7500s3a1", # Ingresos por pensión alimentaria # No está en test
+    #"P7510s1a1", # Ingresos provenientes de otros hogares en los últimos 12 meses # No está en test
+    #"P7510s2a1", # Remesas en los últimos 12 meses # No está en test
+    #"P7510s3a1", # Ayudas de instituciones en los últimos 12 meses # No está en test
+    #"P7510s5a1", # Ingresos financieros en los últimos 12 meses # No está en test
+    #"P7510s6a1", # Ingresos cesantías en los últimos 12 meses # No está en test
+    #"P7510s7a1", # Otros ingresos anuales # No está en test
+  )
+```
+Selección de columnas para datos de prueba (test)
+```{r}
+bd_test <- bd_test %>%
+  select(
+    "id",
+    "Clase",
+    "Dominio", # Ciudad
+    "Depto",
+    "Nper", # Número de personas en el hogar
+    "Npersug", # Número de personas por unidad de gasto
+    "P6020", # Sexo 1 hombre, 2 mujer
+    "P6040", # Edad
+    "P6090", # Cotizante en salud
+    "P6100", # Tipo de regimen de SS en salud
+    "P6210", # Nivel educativo
+    "P6210s1", # Grado escolar aprobado
+    "Oficio", # Tipo de ocupación
+    "P6430", # Cargo desempeñado en el trabajo
+    "Oc", # Ocupado 1
+    "Ina", # Inactivo 1
+    "Lp", # Línea de pobreza
+  )
