@@ -5,6 +5,19 @@ date: "2025-03-19"
 ---
 
 ```{r}
+require(pacman)
+
+p_load(
+  tidyverse,
+  caret,
+  glmnet,
+  Metrics,
+  skimr
+  )
+```
+
+
+```{r}
 raw_data_path <- '../taller_2_bdml/raw_data'
 
 # Datos training
@@ -34,7 +47,6 @@ bd_train <- bd_train %>%
     "Dominio", # Ciudad
     "Depto",
     #"Estrato1", # No está en test
-    "Nper", # Número de personas en el hogar
     "Npersug", # Número de personas por unidad de gasto
     "P6020", # Sexo 1 hombre, 2 mujer
     "P6040", # Edad
@@ -122,7 +134,6 @@ bd_test <- bd_test %>%
     "Dominio", # Ciudad
     "Depto",
     "Nper", # Número de personas en el hogar
-    "Npersug", # Número de personas por unidad de gasto
     "P6020", # Sexo 1 hombre, 2 mujer
     "P6040", # Edad
     "P6090", # Cotizante en salud
@@ -135,3 +146,144 @@ bd_test <- bd_test %>%
     "Ina", # Inactivo 1
     "Lp", # Línea de pobreza
   )
+```
+
+
+```{r}
+skim(bd_train)
+```
+```{r}
+rename_dict <- c(
+  "Nper" = "nper",
+  "P6020" = "female", 
+  "P6040" = "age",
+  "P6090" = "coti_salud",
+  "P6100" = "reg_salud",
+  "P6210" = "educ",
+  "P6210s1" = "grado_escolar",
+  "Oficio" = "oficio",
+  "P6430" = "cargo",
+  "Oc" = "ocupado",
+  "Ina" = "inactivo"
+  )
+
+bd_train <- bd_train %>%
+  rename_with(~ rename_dict[.x], .cols = names(rename_dict))
+
+bd_train <- bd_train %>%
+  mutate(female = ifelse(female==2, 1, 0)) %>%
+  mutate(coti_salud = ifelse(coti_salud==1, 1, 0)) %>%
+  mutate(reg_salud = ifelse(reg_salud==9, 0, reg_salud)) %>%
+  mutate(educ = ifelse(educ==9, 1, educ)) %>%
+  mutate(ocupado = ifelse(ocupado==1, 1, 0)) %>%
+  mutate(inactivo = ifelse(inactivo==1, 1, 0))
+
+cols_to_fill <- c(
+  "coti_salud", 
+  "educ", 
+  "grado_escolar",
+  "oficio",
+  "cargo",
+  "reg_salud",
+  "ocupado",
+  "inactivo"
+  )
+
+bd_train <- bd_train %>%
+  mutate(across(all_of(cols_to_fill), ~ replace_na(., 0)))
+
+cols_to_factor <- c(
+  "Clase", 
+  "Dominio", 
+  "Depto", 
+  "female", 
+  "coti_salud", 
+  "reg_salud", 
+  "educ", 
+  "oficio", 
+  "cargo", 
+  "ocupado",
+  "inactivo", 
+  "Pobre"
+  )
+
+bd_train <- bd_train %>%
+  mutate(across(all_of(cols_to_factor), as.factor))
+```
+```{r}
+bd_test <- bd_test %>%
+  rename_with(~ rename_dict[.x], .cols = names(rename_dict))
+
+bd_test <- bd_test %>%
+  mutate(female = ifelse(female==2, 1, 0)) %>%
+  mutate(coti_salud = ifelse(coti_salud==1, 1, 0)) %>%
+  mutate(reg_salud = ifelse(reg_salud==9, 0, reg_salud)) %>%
+  mutate(educ = ifelse(educ==9, 1, educ)) %>%
+  mutate(ocupado = ifelse(ocupado==1, 1, 0)) %>%
+  mutate(inactivo = ifelse(inactivo==1, 1, 0))
+
+bd_test <- bd_test %>%
+  mutate(across(all_of(cols_to_fill), ~ replace_na(., 0)))
+
+cols_to_factor_test <- c(
+  "Clase", 
+  "Dominio", 
+  "Depto", 
+  "female", 
+  "coti_salud", 
+  "reg_salud", 
+  "educ", 
+  "oficio", 
+  "cargo", 
+  "ocupado",
+  "inactivo"
+  )
+
+bd_test <- bd_test %>%
+  mutate(across(all_of(cols_to_factor_test), as.factor))
+```
+
+
+```{r}
+bd_train <- bd_train %>%
+  mutate(ing_indiv = Ingtotug / nper)
+
+model_form1 <- ing_indiv ~ 
+  Clase + 
+  Dominio + 
+  Depto + 
+  Nper +
+  female +
+  age +
+  coti_salud +
+  reg_salud + 
+  educ +
+  grado_escolar +
+  oficio + 
+  cargo +
+  ocupado +
+  inactivo
+
+model1 <- lm(model_form1, data=bd_train)
+
+prediction1 <- predict(model1, newdata=bd_test)
+```
+```{r}
+df_pred <- bd_test %>%
+  select(id, Nper) %>%
+  as.data.frame() %>%
+  mutate(ing_indiv = !!prediction1) %>%
+  group_by(id) %>%
+  summarise(
+    ingreso_hogar = sum(ing_indiv, na.rm = TRUE),
+    Nper = first(Nper),
+    Ingtotug = ingreso_hogar / Nper
+  ) %>%
+  mutate(Pobre = ifelse(Ingtotug <= 289878.2, 1, 0)) %>%
+  select(id, Pobre)
+```
+```{r}
+write.csv(df_pred, "pred1_gr6.csv", row.names = FALSE)
+```
+
+
