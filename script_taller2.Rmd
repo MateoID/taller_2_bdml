@@ -41,29 +41,77 @@ Selección de columnas para datos de entrenamiento
 ```{r}
 bd_train <- bd_train %>%
   select(
-    # Variables principales
     "id",
     "Clase",
     "Dominio", # Ciudad
     "Depto",
-    #"Estrato1", # No está en test
-    "Npersug", # Número de personas por unidad de gasto
+    "Nper", # Número de personas por hogar
     "P6020", # Sexo 1 hombre, 2 mujer
     "P6040", # Edad
     "P6090", # Cotizante en salud
     "P6100", # Tipo de regimen de SS en salud
     "P6210", # Nivel educativo
     "P6210s1", # Grado escolar aprobado
-    "Oficio", # Tipo de ocupación
-    "P6430", # Cargo desempeñado en el trabajo
     "Oc", # Ocupado 1
     "Ina", # Inactivo 1
     "Lp", # Línea de pobreza
+    "P6240", # Actividad de la semana anterior
+    "Oficio", # Tipo de ocupación
+    "P6426", # Tiempo laborando en la empresa
+    "P6430", # Cargo desempeñado en el trabajo
+    "P6510", # Dicótoma: ingresos por horas extra
+    "P6545", # Dicótoma: ingresos por primas
+    "P6580", # Dicótoma: ingresos por bonificaciones
+    "P6585s1", # Dicótoma: ingresos por alimentación
+    "P6585s2", # Dicótoma: ingresos por subsidio de transporte
+    "P6585s3", # Dicótoma: ingresos por subsidio familiar
+    "P6585s4", # Dicótoma: ingresos por subsidio educativo
+    "P6590",  # Dicótoma: ingresos en especie con alimentación
+    "P6600", # Dicótoma: ingresos en especie con vivienda
+    "P6610", # Dicótoma: usa transporte de la empresa para desplazarse al trabajo   
+    "P6620", # Dicótoma: otros ingresos en especie
+    "P6630s1", # Dicótoma: ingresos por prima de servicios últimos 12 meses
+    "P6630s2", # Dicótoma: ingresos por prima de navidad últimos 12 meses
+    "P6630s3", # Dicótoma: ingresos por prima de vacaciones últimos 12 meses
+    "P6630s4", # Dicótoma: ingresos por viáticos permanentes últimos 12 meses
+    "P6630s6", # Dicótoma: ingresos por bonificaciones anuales últimos 12 meses
+    "P6800", # Horas laboradas durante la última semana
+    "P6870", # Categórica sobre cantidad de empleados en la empresa
+    "P6920", # Cotiza a fondo de pensiones
+    "P7040", # Dicótoma: desempeña una actividad secundaria
+    "P7045", # Horas laboradas durante la última semana en actividad secundaria
+    "P7050", # Tipo de ocupación en el segundo trabajo
+    "P7090", # Dicótoma: tiene interés en trabajar más horas
+    "P7110", # Dicótoma: ha intentado trabajar más horas en el último mes
+    "P7120", # Dicótoma: tiene disponibilidad para trabajar más horas
+    "P7150", # Dicótoma: ha buscado trabajo durante las últimas 4 semanas
+    "P7160", # Dicótoma: puede comenzar un nuevo empleo dentro del mes siguiente
+    "P7310", # Dicótoma: ha trabajado antes durante por lo menos 2 semanas
+    "P7350", # Cargo que ocupaba en su anterior trabajo (desocupados)
+    "P7472", # Ha tenido ingresos durante el mes anterior (desocupados) 
+    "P7495", # Dicótoma: recibió ingresos por arriendos el mes pasado
+    "P7500s2", # Dicótoma: recibió ingresos por pensión el mes pasado
+    "P7500s3", # Dicótoma: recibió ingresos por pensión alimenticia el mes pasado
+    "P7510s1", # Dicótoma: recibió ingresos de otros hogares nacionales el mes pasado
+    "P7510s2", # Dicótoma: recibió ingresos de otros hogares extranjeros el mes pasado
+    "P7510s3", # Dicótoma: recibió ingresos de instituciones el mes pasado
+    "P7510s6", # Dicótoma: recibió ingresos de intereses o dividendos el mes pasado
+    "P7510s7", # Dicótoma: recibió ingresos de otras fuentes el mes pasado
+     
+    # Características del hogar
+    "P5000", # Cantidad de cuartos en el hogar
+    "P5010", # Cantidad de cuartos usados como dormitorios
+    "P5090", # La vivienda es propia, arrendada, usufructuada, etc.
+    "P5100", # Valor de la cuota de amortización
+    "P5130", # Estimación del valor de habitar la vivienda en caso de ser arrendada
+    "P5140", # Valor del arriendo
     
+     # Variables de resultado
     "Pobre", # Pobre 1, de lo contrario 0 (Variable dependiente en training)
     "Ingtotug", # Ingreso per capita de la unidad de gasto (hogar) (Variable dependiente en training)
     
     # Variables secundarias
+    #"Estrato1", # No está en test
     #"Ingtot", # Ingreso total # No está en test
     #"Impa", # Ingreso primera actividad # No está en test
     #"Impaes", # Ingreso primera actividad imputado # No está en test
@@ -84,7 +132,7 @@ bd_train <- bd_train %>%
     #"Iof6", # Ingreso por arriendos # No está en test
     #"Iof6es", # Ingreso por arriendos imputado # No está en test
     
-    # Variables terciarias (en test aparecen las dicótomas sobre si recibe o no ingresos por los siguientes conceptos)
+    # En test aparecen las dicótomas sobre si recibe o no ingresos por los siguientes conceptos
     #"P6500", # Ingresos recibidos # No está en test
     #"P6510s1", # Ingresos por horas extras # No está en test
     #"P6510s2", # Reportó o no el ingreso por horas extras # No está en test
@@ -133,25 +181,69 @@ bd_test <- bd_test %>%
     "Clase",
     "Dominio", # Ciudad
     "Depto",
-    "Nper", # Número de personas en el hogar
+    "Nper", # Número de personas por hogar
     "P6020", # Sexo 1 hombre, 2 mujer
     "P6040", # Edad
     "P6090", # Cotizante en salud
     "P6100", # Tipo de regimen de SS en salud
     "P6210", # Nivel educativo
     "P6210s1", # Grado escolar aprobado
-    "Oficio", # Tipo de ocupación
-    "P6430", # Cargo desempeñado en el trabajo
     "Oc", # Ocupado 1
     "Ina", # Inactivo 1
     "Lp", # Línea de pobreza
+    "P6240", # Actividad de la semana anterior
+    "Oficio", # Tipo de ocupación
+    "P6426", # Tiempo laborando en la empresa
+    "P6430", # Cargo desempeñado en el trabajo
+    "P6510", # Dicótoma: ingresos por horas extra
+    "P6545", # Dicótoma: ingresos por primas
+    "P6580", # Dicótoma: ingresos por bonificaciones
+    "P6585s1", # Dicótoma: ingresos por alimentación
+    "P6585s2", # Dicótoma: ingresos por subsidio de transporte
+    "P6585s3", # Dicótoma: ingresos por subsidio familiar
+    "P6585s4", # Dicótoma: ingresos por subsidio educativo
+    "P6590",  # Dicótoma: ingresos en especie con alimentación
+    "P6600", # Dicótoma: ingresos en especie con vivienda
+    "P6610", # Dicótoma: usa transporte de la empresa para desplazarse al trabajo   
+    "P6620", # Dicótoma: otros ingresos en especie
+    "P6630s1", # Dicótoma: ingresos por prima de servicios últimos 12 meses
+    "P6630s2", # Dicótoma: ingresos por prima de navidad últimos 12 meses
+    "P6630s3", # Dicótoma: ingresos por prima de vacaciones últimos 12 meses
+    "P6630s4", # Dicótoma: ingresos por viáticos permanentes últimos 12 meses
+    "P6630s6", # Dicótoma: ingresos por bonificaciones anuales últimos 12 meses
+    "P6800", # Horas laboradas durante la última semana
+    "P6870", # Categórica sobre cantidad de empleados en la empresa
+    "P6920", # Cotiza a fondo de pensiones
+    "P7040", # Dicótoma: desempeña una actividad secundaria
+    "P7045", # Horas laboradas durante la última semana en actividad secundaria
+    "P7050", # Tipo de ocupación en el segundo trabajo
+    "P7090", # Dicótoma: tiene interés en trabajar más horas
+    "P7110", # Dicótoma: ha intentado trabajar más horas en el último mes
+    "P7120", # Dicótoma: tiene disponibilidad para trabajar más horas
+    "P7150", # Dicótoma: ha buscado trabajo durante las últimas 4 semanas
+    "P7160", # Dicótoma: puede comenzar un nuevo empleo dentro del mes siguiente
+    "P7310", # Dicótoma: ha trabajado antes durante por lo menos 2 semanas
+    "P7350", # Cargo que ocupaba en su anterior trabajo (desocupados)
+    "P7472", # Ha tenido ingresos durante el mes anterior (desocupados) 
+    "P7495", # Dicótoma: recibió ingresos por arriendos el mes pasado
+    "P7500s2", # Dicótoma: recibió ingresos por pensión el mes pasado
+    "P7500s3", # Dicótoma: recibió ingresos por pensión alimenticia el mes pasado
+    "P7510s1", # Dicótoma: recibió ingresos de otros hogares nacionales el mes pasado
+    "P7510s2", # Dicótoma: recibió ingresos de otros hogares extranjeros el mes pasado
+    "P7510s3", # Dicótoma: recibió ingresos de instituciones el mes pasado
+    "P7510s6", # Dicótoma: recibió ingresos de intereses o dividendos el mes pasado
+    "P7510s7", # Dicótoma: recibió ingresos de otras fuentes el mes pasado
+     
+    # Características del hogar
+    "P5000", # Cantidad de cuartos en el hogar
+    "P5010", # Cantidad de cuartos usados como dormitorios
+    "P5090", # La vivienda es propia, arrendada, usufructuada, etc.
+    "P5100", # Valor de la cuota de amortización
+    "P5130", # Estimación del valor de habitar la vivienda en caso de ser arrendada
+    "P5140", # Valor del arriendo
   )
 ```
-
-
-```{r}
-skim(bd_train)
-```
+Limpieza de la BD para training
 ```{r}
 rename_dict <- c(
   "Nper" = "nper",
@@ -164,33 +256,140 @@ rename_dict <- c(
   "Oficio" = "oficio",
   "P6430" = "cargo",
   "Oc" = "ocupado",
-  "Ina" = "inactivo"
+  "Ina" = "inactivo",
+  "P6240" = "ocu_sem_pas", # Actividad de la semana anterior
+  "P6426" = "tenure", # Tiempo laborando en la empresa
+  "P6510" = "horas_extra", # Dicótoma: ingresos por horas extra
+  "P6545" = "primas", # Dicótoma: ingresos por primas
+  "P6580" = "bonificaciones", # Dicótoma: ingresos por bonificaciones
+  "P6585s1" = "alimentacion", # Dicótoma: ingresos por alimentación
+  "P6585s2" = "aux_transporte", # Dicótoma: ingresos por subsidio de transporte
+  "P6585s3" = "sub_familiar", # Dicótoma: ingresos por subsidio familiar
+  "P6585s4" = "sub_educ", # Dicótoma: ingresos por subsidio educativo
+  "P6590" = "ie_alimentacion",  # Dicótoma: ingresos en especie con alimentación
+  "P6600" = "ie_vivienda", # Dicótoma: ingresos en especie con vivienda
+  "P6610" = "trans_empresa", # Dicótoma: usa transporte de la empresa para desplazarse al trabajo   
+  "P6620" = "ie_otros", # Dicótoma: otros ingresos en especie
+  "P6630s1" = "prima_servicios", # Dicótoma: ingresos por prima de servicios últimos 12 meses
+  "P6630s2" = "prima_navidad", # Dicótoma: ingresos por prima de navidad últimos 12 meses
+  "P6630s3" = "prima_vacaciones", # Dicótoma: ingresos por prima de vacaciones últimos 12 meses
+  "P6630s4" = "viaticos", # Dicótoma: ingresos por viáticos permanentes últimos 12 meses
+  "P6630s6" = "bono_anual", # Dicótoma: ingresos por bonificaciones anuales últimos 12 meses
+  "P6800" = "hr_lab", # Horas laboradas durante la última semana
+  "P6870" = "empleados_empresa", # Categórica sobre cantidad de empleados en la empresa
+  "P6920" = "cotiz_pension", # Cotiza a fondo de pensiones
+  "P7040" = "segundo_trabajo", # Dicótoma: desempeña una actividad secundaria
+  "P7045" = "hr_lab2", # Horas laboradas durante la última semana en actividad secundaria
+  "P7050" = "cargo2", # Tipo de ocupación en el segundo trabajo
+  "P7090" = "interes_mas_hr", # Dicótoma: tiene interés en trabajar más horas
+  "P7110" = "intent_mas_hr", # Dicótoma: ha intentado trabajar más horas en el último mes
+  "P7120" = "dispon_mas_hr", # Dicótoma: tiene disponibilidad para trabajar más horas
+  "P7150" = "busca_trabajo", # Dicótoma: ha buscado trabajo durante las últimas 4 semanas
+  "P7160" = "dispon_nuevo_trab", # Dicótoma: puede comenzar un nuevo empleo dentro del mes siguiente
+  "P7310" = "primer_trabajo", # Dicótoma: ha trabajado antes durante por lo menos 2 semanas
+  "P7350" = "cargo_anterior", # Cargo que ocupaba en su anterior trabajo (desocupados)
+  "P7472" = "ingreso_anterior", # Dicótoma: si ha tenido ingresos durante el mes anterior (desocupados) 
+  "P7495" = "ing_arriendo", # Dicótoma: recibió ingresos por arriendos el mes pasado
+  "P7500s2" = "ing_pension", # Dicótoma: recibió ingresos por pensión el mes pasado
+  "P7500s3" = "ing_alimentos", # Dicótoma: recibió ingresos por pensión alimenticia el mes pasado
+  "P7510s1" = "remesa_nal", # Dicótoma: recibió ingresos de otros hogares nacionales el mes pasado
+  "P7510s2" = "remesa_ext", # Dicótoma: recibió ingresos de otros hogares extranjeros el mes pasado
+  "P7510s3" = "ayudas", # Dicótoma: recibió ingresos de instituciones el mes pasado
+  "P7510s6" = "ing_int", # Dicótoma: recibió ingresos de intereses o dividendos el mes pasado
+  "P7510s7" = "ing_otros", # Dicótoma: recibió ingresos de otras fuentes el mes pasado
+   
+  # Características del hogar
+  "P5000" = "cuartos", # Cantidad de cuartos en el hogar
+  "P5010" = "dormitorios", # Cantidad de cuartos usados como dormitorios
+  "P5090" = "viv_prop", # La vivienda es propia, arrendada, usufructuada, etc.
+  "P5100" = "cuota_amort", # Valor de la cuota de amortización
+  "P5130" = "estim_arriendo", # Estimación del valor de habitar la vivienda en caso de ser arrendada
+  "P5140" = "arriendo" # Valor del arriendo
   )
-
+# Se renombran las variables para facilidad de manejo, de acuerdo con el diccionario "rename_dict"
 bd_train <- bd_train %>%
   rename_with(~ rename_dict[.x], .cols = names(rename_dict))
 
+# Se ajustan los valores de algunas variables para evitar categorías irrelevantes
 bd_train <- bd_train %>%
   mutate(female = ifelse(female==2, 1, 0)) %>%
-  mutate(coti_salud = ifelse(coti_salud==1, 1, 0)) %>%
-  mutate(reg_salud = ifelse(reg_salud==9, 0, reg_salud)) %>%
-  mutate(educ = ifelse(educ==9, 1, educ)) %>%
-  mutate(ocupado = ifelse(ocupado==1, 1, 0)) %>%
-  mutate(inactivo = ifelse(inactivo==1, 1, 0))
+  mutate(reg_salud = ifelse(reg_salud==9, 4, reg_salud)) %>%
+  mutate(educ = ifelse(educ==9, 1, educ))
 
-cols_to_fill <- c(
-  "coti_salud", 
-  "educ", 
-  "grado_escolar",
-  "oficio",
-  "cargo",
-  "reg_salud",
+lista_unos_ceros <- c(
+  "coti_salud",
   "ocupado",
-  "inactivo"
+  "inactivo",
+  "horas_extra",
+  "primas",
+  "bonificaciones",
+  "alimentacion",
+  "aux_transporte",
+  "sub_familiar",
+  "sub_educ",
+  "ie_alimentacion",
+  "ie_vivienda",
+  "trans_empresa",
+  "ie_otros",
+  "prima_servicios",
+  "prima_navidad",
+  "prima_vacaciones", 
+  "viaticos",
+  "bono_anual",
+  "segundo_trabajo",
+  "interes_mas_hr", 
+  "intent_mas_hr", 
+  "dispon_mas_hr", 
+  "busca_trabajo", 
+  "dispon_nuevo_trab",
+  "primer_trabajo",
+  "ingreso_anterior",
+  "ing_arriendo",
+  "ing_pension", 
+  "ing_alimentos",
+  "remesa_nal",
+  "remesa_ext",
+  "ayudas",
+  "ing_int",
+  "ing_otros"
+)
+
+# Función para conservar los valores 1 y volver los demás 0, así como llenar NA con 0
+unos_ceros <- function(bd, lista) {
+  
+  for (var in lista) {
+    bd <- bd %>%
+      mutate(!!var := ifelse(.data[[var]] == 1, 1, 0)) %>%
+      mutate(!!var := replace_na(.data[[var]], 0))
+  }
+  
+  return(bd)
+}
+
+# Aquí se aplica la función "unos_ceros"
+bd_train <- unos_ceros(bd_train, lista_unos_ceros)
+
+cols_cero <- c(
+  "tenure",
+  "grado_escolar",
+  "hr_lab",
+  "hr_lab2",
+  "cuota_amort",
+  "arriendo"
   )
 
+# Ajuste de variables con más de dos categorías para llenar NA con valores correspondientes
 bd_train <- bd_train %>%
-  mutate(across(all_of(cols_to_fill), ~ replace_na(., 0)))
+  mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(ocu_sem_pas = replace_na(ocu_sem_pas, 2)) %>%
+  mutate(empleados_empresa = replace_na(empleados_empresa, 2)) %>%
+  mutate(cotiz_pension = replace_na(cotiz_pension, 2)) %>%
+  mutate(reg_salud = replace_na(reg_salud, 4)) %>%
+  #mutate(viv_prop = replace_na(viv_prop, 6)) %>%
+  mutate(cargo = replace_na(cargo, 9))  %>%
+  mutate(cargo2 = replace_na(cargo2, 9)) %>%
+  mutate(cargo_anterior = replace_na(cargo_anterior, 9)) %>%
+  mutate(oficio = replace_na(oficio, 99))
 
 cols_to_factor <- c(
   "Clase", 
@@ -204,65 +403,100 @@ cols_to_factor <- c(
   "cargo", 
   "ocupado",
   "inactivo", 
-  "Pobre"
+  "Pobre",
+  "ocu_sem_pas",
+  "horas_extra",
+  "primas",
+  "bonificaciones",
+  "alimentacion",
+  "aux_transporte",
+  "sub_familiar",
+  "sub_educ", 
+  "ie_alimentacion",
+  "ie_vivienda",
+  "ie_otros",
+  "alimentacion",
+  "trans_empresa",
+  "prima_servicios",
+  "prima_navidad",
+  "prima_vacaciones",
+  "viaticos", 
+  "bono_anual",
+  "empleados_empresa",
+  "cotiz_pension",
+  "segundo_trabajo",
+  "cargo2",
+  "interes_mas_hr",
+  "intent_mas_hr",
+  "dispon_mas_hr",
+  "busca_trabajo",
+  "dispon_nuevo_trab",
+  "primer_trabajo",
+  "cargo_anterior",
+  "ingreso_anterior",
+  "ing_arriendo",
+  "ing_pension",
+  "ing_alimentos",
+  "remesa_nal",
+  "remesa_ext",
+  "ayudas",
+  "ing_int",
+  "ing_otros",
+  "viv_prop"
   )
 
+# Conversión de variables categóricas a factor
 bd_train <- bd_train %>%
   mutate(across(all_of(cols_to_factor), as.factor))
 ```
+Limpieza de la BD para test
 ```{r}
+# A la bd_test se le aplica el mismo proceso de limpieza que a bd_train
+
 bd_test <- bd_test %>%
   rename_with(~ rename_dict[.x], .cols = names(rename_dict))
 
 bd_test <- bd_test %>%
   mutate(female = ifelse(female==2, 1, 0)) %>%
-  mutate(coti_salud = ifelse(coti_salud==1, 1, 0)) %>%
-  mutate(reg_salud = ifelse(reg_salud==9, 0, reg_salud)) %>%
-  mutate(educ = ifelse(educ==9, 1, educ)) %>%
-  mutate(ocupado = ifelse(ocupado==1, 1, 0)) %>%
-  mutate(inactivo = ifelse(inactivo==1, 1, 0))
+  mutate(reg_salud = ifelse(reg_salud==9, 4, reg_salud)) %>%
+  mutate(educ = ifelse(educ==9, 1, educ))
+
+bd_test <- unos_ceros(bd_test, lista_unos_ceros)
 
 bd_test <- bd_test %>%
-  mutate(across(all_of(cols_to_fill), ~ replace_na(., 0)))
+  mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(ocu_sem_pas = replace_na(ocu_sem_pas, 2)) %>%
+  mutate(empleados_empresa = replace_na(empleados_empresa, 2)) %>%
+  mutate(cotiz_pension = replace_na(cotiz_pension, 2)) %>%
+  mutate(reg_salud = replace_na(reg_salud, 4)) %>%
+  #mutate(viv_prop = replace_na(viv_prop, 6)) %>%
+  mutate(cargo = replace_na(cargo, 9))  %>%
+  mutate(cargo2 = replace_na(cargo2, 9)) %>%
+  mutate(cargo_anterior = replace_na(cargo_anterior, 9)) %>%
+  mutate(oficio = replace_na(oficio, 99))
 
-cols_to_factor_test <- c(
-  "Clase", 
-  "Dominio", 
-  "Depto", 
-  "female", 
-  "coti_salud", 
-  "reg_salud", 
-  "educ", 
-  "oficio", 
-  "cargo", 
-  "ocupado",
-  "inactivo"
-  )
+cols_to_factor_test <- setdiff(cols_to_factor, "Pobre")
 
 bd_test <- bd_test %>%
   mutate(across(all_of(cols_to_factor_test), as.factor))
 ```
-
-
 ```{r}
 bd_train <- bd_train %>%
   mutate(ing_indiv = Ingtotug / nper)
 
 model_form1 <- ing_indiv ~ 
-  Clase + 
-  Dominio + 
-  Depto + 
-  Nper +
-  female +
-  age +
-  coti_salud +
-  reg_salud + 
-  educ +
-  grado_escolar +
-  oficio + 
-  cargo +
-  ocupado +
-  inactivo
+  Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
+  educ + grado_escolar + ocupado +  inactivo + ocu_sem_pas +  oficio + tenure +
+  cargo + horas_extra + primas +  bonificaciones + alimentacion + aux_transporte +
+  sub_familiar + sub_educ + ie_alimentacion + ie_vivienda + trans_empresa +    
+  ie_otros + prima_servicios + prima_navidad + prima_vacaciones + viaticos +
+  bono_anual + hr_lab + empleados_empresa + cotiz_pension + segundo_trabajo +
+  hr_lab2 + cargo2 + interes_mas_hr + intent_mas_hr + dispon_mas_hr +
+  primer_trabajo + dispon_nuevo_trab + cargo_anterior +  
+  ingreso_anterior + ing_arriendo + ing_pension + ing_alimentos + remesa_nal +
+  remesa_ext + ayudas + ing_int + ing_otros + cuartos + dormitorios +
+  cuota_amort + estim_arriendo + arriendo
+  # viv_prop # Por alguna razón esta variable genera error al hacer la predicción 
 
 model1 <- lm(model_form1, data=bd_train)
 
@@ -270,14 +504,14 @@ prediction1 <- predict(model1, newdata=bd_test)
 ```
 ```{r}
 df_pred <- bd_test %>%
-  select(id, Nper) %>%
+  select(id, nper) %>%
   as.data.frame() %>%
   mutate(ing_indiv = !!prediction1) %>%
   group_by(id) %>%
   summarise(
     ingreso_hogar = sum(ing_indiv, na.rm = TRUE),
-    Nper = first(Nper),
-    Ingtotug = ingreso_hogar / Nper
+    nper = first(nper),
+    Ingtotug = ingreso_hogar / nper
   ) %>%
   mutate(Pobre = ifelse(Ingtotug <= 289878.2, 1, 0)) %>%
   select(id, Pobre)
