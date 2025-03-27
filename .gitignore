@@ -37,3 +37,7 @@ Temporary Items
 ### macOS Patch ###
 # iCloud generated files
 *.icloud
+
+# ignorando la data del proyecto
+data/*.txt
+data/*.csv

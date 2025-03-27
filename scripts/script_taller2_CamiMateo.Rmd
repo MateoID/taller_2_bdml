@@ -2,6 +2,9 @@
 title: "script_taller2"
 output: null
 date: "2025-03-19"
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 # 0. CONFIGURACIÓN
@@ -23,7 +26,7 @@ p_load(
 ## Carga de datos y joints
 
 ```{r}
-raw_data_path <- '../taller_2_bdml/raw_data'
+raw_data_path <- '../data'
 
 # Datos training
 hogares_tr <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
@@ -518,52 +521,86 @@ model1 <- lm(model_form1, data=bd_train)
 prediction1 <- predict(model1, newdata=bd_test)
 ```
 
+# 1. INTRODUCCIÓN
 
+## +Rúbrica+++++++++++++++
 
-# 1. INTRODUCCIÓN 
+-   Se enuncia con claridad y precisión el problema,
 
+-   Se mencionan antecedentes relevantes y debidamente documentados
 
+-   Se presentan brevemente los datos y la pertinencia para responder el
+    problema planteado en el taller.
 
-# 2. DATA 
+-   Contiene un resumen de los resultados, mencionando los modelos
+    “ganadores” enviados a Kaggle.
 
+-   Se presentan breves conclusiones del análisis.
 
+# 
+
+# 2. DATA
+
+## +Rúbrica++++++++++++++
+
+1.  Se realiza una descripción completa de la fuente de datos, original
+    y la provista para el taller.
+
+2.  Se discute la utilidad de la base para la solución del problema
+    planteado en el taller.
+
+3.  Se describe como se obtiene la muestra final: incluyendo el unido de
+    base, la transformación de variables y las variables incluidas en el
+    análisis
+
+4.  Se realiza un análisis descriptivo de las variables utilizadas en el
+    análisis donde se presentan tablas y/o gráficos.
+
+5.  El análisis descriptivo permite al lector entender la variación de
+    los datos y la elección de las variables.
+
+6.  Se utiliza el conocimiento profesional y los antecedentes para
+    agregar valor a la sección.
 
 # 3. MODELS AND RESULTS
 
 ## Requerimientos del taller
-1. Model Selection and Training: A detailed discussion of the model that achieved
-the team's highest public score in Kaggle. This discussion should include the
-training process, selection of hyperparameters, and any additional methodologi-
-cal considerations. Additionally, the analysis must justify whether a class imbal-
-ance strategy was used or not, explaining any sub-sampling or weighting strate-
-gies implemented to address potential class imbalances in the data.
 
-2. Hyperparameter Tuning: A dedicated section describing how hyperparameters
-were selected for each chosen model. This must include the range of values
-tested, the search strategy (e.g., grid search or other methods), the rationale for
-choosing those ranges, and a summary of cross-validation results or performance
-metrics that guided the nal choices.
+1.  Model Selection and Training: A detailed discussion of the model
+    that achieved the team's highest public score in Kaggle. This
+    discussion should include the training process, selection of
+    hyperparameters, and any additional methodologi- cal considerations.
+    Additionally, the analysis must justify whether a class imbal- ance
+    strategy was used or not, explaining any sub-sampling or weighting
+    strate- gies implemented to address potential class imbalances in
+    the data.
 
-3. Comparative Analysis: A comparison between the best-performing model and
-at least ve of the other ve best-performing team submissions in Kaggle.
-This comparison should highlight dierences in performance and provide an
-explanation of why certain models outperformed others | whether due to is-
-sues related to specication, training parameters, feature selection, or any other
-relevant aspect.
+2.  Hyperparameter Tuning: A dedicated section describing how
+    hyperparameters were selected for each chosen model. This must
+    include the range of values tested, the search strategy (e.g., grid
+    search or other methods), the rationale for choosing those ranges,
+    and a summary of cross-validation results or performance metrics
+    that guided the nal choices.
 
-4. Feature Importance: A discussion of the relative importance of the variables in
-the best-performing model, explaining why certain features played a key role
-in improving predictions. This explanation should be supported by empirical
-evidence, such as feature importance scores or any other method used to assess
-variable contribution.
+3.  Comparative Analysis: A comparison between the best-performing model
+    and at least ve of the other ve best-performing team submissions in
+    Kaggle. This comparison should highlight dierences in performance
+    and provide an explanation of why certain models outperformed others
+    \| whether due to is- sues related to specication, training
+    parameters, feature selection, or any other relevant aspect.
 
+4.  Feature Importance: A discussion of the relative importance of the
+    variables in the best-performing model, explaining why certain
+    features played a key role in improving predictions. This
+    explanation should be supported by empirical evidence, such as
+    feature importance scores or any other method used to assess
+    variable contribution.
 
-## Distribución 
+## Distribución
 
-Cami y Mateo: Linear Regression, Elastic Net, Random Forest 
+Cami y Mateo: Linear Regression, Elastic Net, Random Forest
 
 Nico y Javier: Logistic Regression, CART, Boosting
-
 
 ## Pruebas MATEO
 
@@ -586,24 +623,91 @@ df_pred <- bd_test %>%
 write.csv(df_pred, "pred1_gr6.csv", row.names = FALSE)
 ```
 
-## Pruebas NICOLÁS 
-
-
-
-
-## Pruebas JAVIER
-
-
-
-
 ## Pruebas CAMILA
 
+## +Rúbrica+++++++++++++++
 
+### Modelo basado en clasificación
 
+1.  Se explica claramente el intento de predecir directamente pobres (1)
+    y no pobres (0)
 
+2.  La explicación incluye las variables utilizadas en los modelos
 
+3.  Se describen brevemente los algoritmos utilizados para las entregas
 
+4.  Se utilizan al menos 3 algoritmos distintos
 
+### Modelo basado en regresión
 
+1.  Se explica claramente el intento de predecir directamente pobres (1)
+    y no pobres (0)
 
+2.  La explicación incluye las variables utilizadas en los modelos
 
+3.  Se describen brevemente los algoritmos utilizados para las entregas
+
+4.  Se utilizan al menos 3 algoritmos distintos
+
+### Modelo final
+
+1.  Se describen detalladamente los dos mejores modelos o los elegidos
+    para la evaluación en Kaggle. Un modelo es el del enfoque de
+    clasificación y el otro modelo es del de clasificación
+
+2.  La descripción detalla el proceso de entrenamiento de los
+    parámetros, la selección de los hiper-parámetros y/o cualquier otra
+    información relevante para la comprensión de los modelos.
+
+3.  Se compara la performance predictiva de estos modelos a otros dos
+    modelos por cada enfoque que se hayan enviado a Kaggle.
+
+4.  Se discute la importancia relativa de las variables utilizadas en
+    cada uno de los dos mejores modelos. Se contrastan similitudes y
+    diferencias.
+
+5.  Si se utiliza una estrategia de re-muestreo para el desbalance de
+    clases. Esta esta explicada correctamente, con los detalles
+    pertinentes.
+
+# 4. Conclusión
+
+# 99. ENVÍOS
+
+Use the following naming convention for your submissions: include the
+algorithm and hyperparameters. For example:
+
+-   `EN_lambda_1000_alpha_05.csv` indicates this attempt was generated
+    with an Elastic Net with a lambda equal to 1000 and an alpha equal
+    to 0.5.
+
+Each submission file should contain two columns: `id` and `pobre`. `id`
+is the household-level id, and `pobre` is the binary prediction.
+
+The file should contain a header and have the following format:
+
+```{r}
+
+# id,pobre 
+# 14cb43ab34e121bafc292d45,    0 
+# 7fa50f6bd6d6a6c0d7f6f57c,    1 
+```
+
+# 99. DOCUMENTO Y REPOSITORIO
+
+## +Rúbrica+++++++++++++++
+
+1.  El documento es autocontenido, no excede las 10 páginas y las 8
+    tablas o figuras.
+
+2.  Existe el repositorio siguiendo el template provisto
+
+3.  Contiene un README que ayuda al lector a navegar el repositorio e
+    incluye instrucciones breves para replicar completamente el trabajo.
+
+4.  La rama del repositorio principal muestra al menos cinco (5)
+    contribuciones que aportan significativamente al taller, por parte
+    de cada miembro del equipo.
+
+5.  El código en el repositorio es reproducible, es legible y
+    reproducible 
