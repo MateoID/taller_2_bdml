@@ -4,6 +4,10 @@ output: null
 date: "2025-03-19"
 ---
 
+# 0. CONFIGURACIÓN
+
+## Librerias
+
 ```{r}
 require(pacman)
 
@@ -16,6 +20,7 @@ p_load(
   )
 ```
 
+## Carga de datos y joints
 
 ```{r}
 raw_data_path <- '../taller_2_bdml/raw_data'
@@ -28,6 +33,7 @@ personas_tr <- read.csv(file.path(raw_data_path, 'train_personas.csv'))
 hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
 personas_te <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
 ```
+
 ```{r}
 # Tabla training
 bd_train <- personas_tr %>%
@@ -37,7 +43,9 @@ bd_train <- personas_tr %>%
 bd_test <- personas_te %>%
   left_join(hogares_te, join_by("id", "Clase", "Dominio", "Fex_c", "Depto", "Fex_dpto"))
 ```
-Selección de columnas para datos de entrenamiento
+
+## Selección de variables (Train)
+
 ```{r}
 bd_train <- bd_train %>%
   select(
@@ -173,7 +181,9 @@ bd_train <- bd_train %>%
     #"P7510s7a1", # Otros ingresos anuales # No está en test
   )
 ```
-Selección de columnas para datos de prueba (test)
+
+## Selección de variables (Test)
+
 ```{r}
 bd_test <- bd_test %>%
   select(
@@ -243,7 +253,9 @@ bd_test <- bd_test %>%
     "P5140", # Valor del arriendo
   )
 ```
-Limpieza de la BD para training
+
+## Limpieza de la BD para training
+
 ```{r}
 rename_dict <- c(
   "Nper" = "nper",
@@ -449,7 +461,9 @@ cols_to_factor <- c(
 bd_train <- bd_train %>%
   mutate(across(all_of(cols_to_factor), as.factor))
 ```
-Limpieza de la BD para test
+
+## Limpieza de la BD test
+
 ```{r}
 # A la bd_test se le aplica el mismo proceso de limpieza que a bd_train
 
@@ -480,6 +494,7 @@ cols_to_factor_test <- setdiff(cols_to_factor, "Pobre")
 bd_test <- bd_test %>%
   mutate(across(all_of(cols_to_factor_test), as.factor))
 ```
+
 ```{r}
 bd_train <- bd_train %>%
   mutate(ing_indiv = Ingtotug / nper)
@@ -502,6 +517,56 @@ model1 <- lm(model_form1, data=bd_train)
 
 prediction1 <- predict(model1, newdata=bd_test)
 ```
+
+
+
+# 1. INTRODUCCIÓN 
+
+
+
+# 2. DATA 
+
+
+
+# 3. MODELS AND RESULTS
+
+## Requerimientos del taller
+1. Model Selection and Training: A detailed discussion of the model that achieved
+the team's highest public score in Kaggle. This discussion should include the
+training process, selection of hyperparameters, and any additional methodologi-
+cal considerations. Additionally, the analysis must justify whether a class imbal-
+ance strategy was used or not, explaining any sub-sampling or weighting strate-
+gies implemented to address potential class imbalances in the data.
+
+2. Hyperparameter Tuning: A dedicated section describing how hyperparameters
+were selected for each chosen model. This must include the range of values
+tested, the search strategy (e.g., grid search or other methods), the rationale for
+choosing those ranges, and a summary of cross-validation results or performance
+metrics that guided the nal choices.
+
+3. Comparative Analysis: A comparison between the best-performing model and
+at least ve of the other ve best-performing team submissions in Kaggle.
+This comparison should highlight dierences in performance and provide an
+explanation of why certain models outperformed others | whether due to is-
+sues related to specication, training parameters, feature selection, or any other
+relevant aspect.
+
+4. Feature Importance: A discussion of the relative importance of the variables in
+the best-performing model, explaining why certain features played a key role
+in improving predictions. This explanation should be supported by empirical
+evidence, such as feature importance scores or any other method used to assess
+variable contribution.
+
+
+## Distribución 
+
+Cami y Mateo: Linear Regression, Elastic Net, Random Forest 
+
+Nico y Javier: Logistic Regression, CART, Boosting
+
+
+## Pruebas MATEO
+
 ```{r}
 df_pred <- bd_test %>%
   select(id, nper) %>%
@@ -516,8 +581,29 @@ df_pred <- bd_test %>%
   mutate(Pobre = ifelse(Ingtotug <= 289878.2, 1, 0)) %>%
   select(id, Pobre)
 ```
+
 ```{r}
 write.csv(df_pred, "pred1_gr6.csv", row.names = FALSE)
 ```
+
+## Pruebas NICOLÁS 
+
+
+
+
+## Pruebas JAVIER
+
+
+
+
+## Pruebas CAMILA
+
+
+
+
+
+
+
+
 
 
