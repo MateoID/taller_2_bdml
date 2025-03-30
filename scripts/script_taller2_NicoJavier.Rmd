@@ -396,11 +396,11 @@ cols_cero <- c(
 # Ajuste de variables con más de dos categorías para llenar NA con valores correspondientes
 bd_train <- bd_train %>%
   mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(empleados_empresa = replace_na(empleados_empresa, 1)) %>%
   mutate(ocu_sem_pas = replace_na(ocu_sem_pas, 2)) %>%
-  mutate(empleados_empresa = replace_na(empleados_empresa, 2)) %>%
   mutate(cotiz_pension = replace_na(cotiz_pension, 2)) %>%
   mutate(reg_salud = replace_na(reg_salud, 4)) %>%
-  #mutate(viv_prop = replace_na(viv_prop, 6)) %>%
+  mutate(viv_prop = replace_na(viv_prop, 6)) %>%
   mutate(cargo = replace_na(cargo, 9))  %>%
   mutate(cargo2 = replace_na(cargo2, 9)) %>%
   mutate(cargo_anterior = replace_na(cargo_anterior, 9)) %>%
@@ -482,11 +482,11 @@ bd_test <- unos_ceros(bd_test, lista_unos_ceros)
 
 bd_test <- bd_test %>%
   mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(empleados_empresa = replace_na(empleados_empresa, 1)) %>%
   mutate(ocu_sem_pas = replace_na(ocu_sem_pas, 2)) %>%
-  mutate(empleados_empresa = replace_na(empleados_empresa, 2)) %>%
   mutate(cotiz_pension = replace_na(cotiz_pension, 2)) %>%
   mutate(reg_salud = replace_na(reg_salud, 4)) %>%
-  #mutate(viv_prop = replace_na(viv_prop, 6)) %>%
+  mutate(viv_prop = replace_na(viv_prop, 6)) %>%
   mutate(cargo = replace_na(cargo, 9))  %>%
   mutate(cargo2 = replace_na(cargo2, 9)) %>%
   mutate(cargo_anterior = replace_na(cargo_anterior, 9)) %>%

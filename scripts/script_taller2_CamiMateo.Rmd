@@ -26,7 +26,7 @@ p_load(
 ## Carga de datos y joints
 
 ```{r}
-raw_data_path <- '../data'
+raw_data_path <- '../raw_data'
 
 # Datos training
 hogares_tr <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
@@ -108,7 +108,8 @@ bd_train <- bd_train %>%
     "P7510s3", # Dicótoma: recibió ingresos de instituciones el mes pasado
     "P7510s6", # Dicótoma: recibió ingresos de intereses o dividendos el mes pasado
     "P7510s7", # Dicótoma: recibió ingresos de otras fuentes el mes pasado
-     
+    "Ingtot", # Ingreso total # No está en test 
+    
     # Características del hogar
     "P5000", # Cantidad de cuartos en el hogar
     "P5010", # Cantidad de cuartos usados como dormitorios
@@ -123,7 +124,6 @@ bd_train <- bd_train %>%
     
     # Variables secundarias
     #"Estrato1", # No está en test
-    #"Ingtot", # Ingreso total # No está en test
     #"Impa", # Ingreso primera actividad # No está en test
     #"Impaes", # Ingreso primera actividad imputado # No está en test
     #"Isa", # Ingreso segunda actividad # No está en test
@@ -246,7 +246,7 @@ bd_test <- bd_test %>%
     "P7510s3", # Dicótoma: recibió ingresos de instituciones el mes pasado
     "P7510s6", # Dicótoma: recibió ingresos de intereses o dividendos el mes pasado
     "P7510s7", # Dicótoma: recibió ingresos de otras fuentes el mes pasado
-     
+    
     # Características del hogar
     "P5000", # Cantidad de cuartos en el hogar
     "P5010", # Cantidad de cuartos usados como dormitorios
@@ -390,17 +390,20 @@ cols_cero <- c(
   "hr_lab",
   "hr_lab2",
   "cuota_amort",
-  "arriendo"
+  "estim_arriendo",
+  "arriendo",
+  "Ingtot"
   )
 
 # Ajuste de variables con más de dos categorías para llenar NA con valores correspondientes
 bd_train <- bd_train %>%
   mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(educ = replace_na(educ, 1)) %>%
+  mutate(empleados_empresa = replace_na(empleados_empresa, 1)) %>%
   mutate(ocu_sem_pas = replace_na(ocu_sem_pas, 2)) %>%
-  mutate(empleados_empresa = replace_na(empleados_empresa, 2)) %>%
   mutate(cotiz_pension = replace_na(cotiz_pension, 2)) %>%
   mutate(reg_salud = replace_na(reg_salud, 4)) %>%
-  #mutate(viv_prop = replace_na(viv_prop, 6)) %>%
+  mutate(viv_prop = replace_na(viv_prop, 6)) %>%
   mutate(cargo = replace_na(cargo, 9))  %>%
   mutate(cargo2 = replace_na(cargo2, 9)) %>%
   mutate(cargo_anterior = replace_na(cargo_anterior, 9)) %>%
@@ -469,7 +472,6 @@ bd_train <- bd_train %>%
 
 ```{r}
 # A la bd_test se le aplica el mismo proceso de limpieza que a bd_train
-
 bd_test <- bd_test %>%
   rename_with(~ rename_dict[.x], .cols = names(rename_dict))
 
@@ -480,13 +482,16 @@ bd_test <- bd_test %>%
 
 bd_test <- unos_ceros(bd_test, lista_unos_ceros)
 
+cols_cero_test <- setdiff(cols_cero, "Ingtot")
+
 bd_test <- bd_test %>%
-  mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(across(all_of(cols_cero_test), ~ replace_na(., 0))) %>%
+  mutate(educ = replace_na(educ, 1)) %>%
+  mutate(empleados_empresa = replace_na(empleados_empresa, 1)) %>%
   mutate(ocu_sem_pas = replace_na(ocu_sem_pas, 2)) %>%
-  mutate(empleados_empresa = replace_na(empleados_empresa, 2)) %>%
   mutate(cotiz_pension = replace_na(cotiz_pension, 2)) %>%
   mutate(reg_salud = replace_na(reg_salud, 4)) %>%
-  #mutate(viv_prop = replace_na(viv_prop, 6)) %>%
+  mutate(viv_prop = replace_na(viv_prop, 6)) %>%
   mutate(cargo = replace_na(cargo, 9))  %>%
   mutate(cargo2 = replace_na(cargo2, 9)) %>%
   mutate(cargo_anterior = replace_na(cargo_anterior, 9)) %>%
@@ -497,12 +502,9 @@ cols_to_factor_test <- setdiff(cols_to_factor, "Pobre")
 bd_test <- bd_test %>%
   mutate(across(all_of(cols_to_factor_test), as.factor))
 ```
-
+Especificación modelo 1a
 ```{r}
-bd_train <- bd_train %>%
-  mutate(ing_indiv = Ingtotug / nper)
-
-model_form1 <- ing_indiv ~ 
+model_form1a <- Ingtot ~ 
   Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
   educ + grado_escolar + ocupado +  inactivo + ocu_sem_pas +  oficio + tenure +
   cargo + horas_extra + primas +  bonificaciones + alimentacion + aux_transporte +
@@ -514,13 +516,119 @@ model_form1 <- ing_indiv ~
   ingreso_anterior + ing_arriendo + ing_pension + ing_alimentos + remesa_nal +
   remesa_ext + ayudas + ing_int + ing_otros + cuartos + dormitorios +
   cuota_amort + estim_arriendo + arriendo
-  # viv_prop # Por alguna razón esta variable genera error al hacer la predicción 
 
-model1 <- lm(model_form1, data=bd_train)
+# Se excluyen las observaciones de menores con NA (en principio no había por la limpieza previa, pero salió error)
+bd_modelo1 <- na.omit(bd_train)
 
-prediction1 <- predict(model1, newdata=bd_test)
+# Implementción de elastic net para determinar los predictores más relevantes y sus coeficientes
+set.seed(2903)
+
+fitControl <- trainControl( 
+  method = "cv",
+  number = 10)
+
+# Los valores de alpha y lambda son muchos, el computador tomo casi 30 mins en ejecutar el código
+#tune_grid <- expand.grid(
+#  alpha=seq(0, 1, 0.01),
+#  lambda=seq(0, 5, 0.05)
+#)
+#
+#model1a <- train(
+#  model_form1a,
+#  data=bd_train,
+#  method='glmnet',
+#  trControl=fitControl,
+#  tuneGrid=tune_grid
+#)
+```
+Especificación modelo 1b
+```{r}
+model_form1e <- Ingtot ~ 
+  Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
+  educ + grado_escolar + ocupado + ocu_sem_pas +  oficio + tenure +
+  cargo + horas_extra + primas +  bonificaciones + alimentacion + aux_transporte +
+  sub_familiar + sub_educ + ie_alimentacion + ie_vivienda + trans_empresa +    
+  ie_otros + prima_servicios + prima_navidad + prima_vacaciones + viaticos +
+  bono_anual + hr_lab + empleados_empresa + cotiz_pension + segundo_trabajo +
+  hr_lab2 + cargo2 + interes_mas_hr + intent_mas_hr + dispon_mas_hr +
+  primer_trabajo + dispon_nuevo_trab + cargo_anterior +  
+  ingreso_anterior + ing_arriendo + ing_pension + ing_alimentos + remesa_nal +
+  remesa_ext + ayudas + ing_int + ing_otros + cuartos + dormitorios +
+  cuota_amort + estim_arriendo
+```
+Modelo de regresión
+```{r}
+bd_train <- na.omit(bd_train)
+
+# Implementción de elastic net para determinar los predictores más relevantes y sus coeficientes
+set.seed(2903)
+
+fitControl <- trainControl( 
+  method = "cv",
+  number = 10)
+
+# A través de iteraciones previas identificamos como valores optimos de alpha 0.03 y 
+# de lambda 4600, sin embargo usando glmnet obtivimos lambda óptimo de 30140.85
+tune_grid <- expand.grid(
+  alpha=0.03,
+  lambda=seq(4616, 4618, 0.2)
+)
+
+model1b <- train(
+  model_form1e,
+  data=bd_train,
+  method='glmnet',
+  trControl=fitControl,
+  tuneGrid=tune_grid
+)
+```
+Predicción usando el modelo1b con los valores de alpha y lambda óptimos
+```{r}
+prediccion_2903 <- predict(model1e, newdata=bd_test)
+
+df_pred <- bd_test %>%
+  select(id, nper) %>%
+  as.data.frame() %>%
+  mutate(ing_indiv = !!prediccion_2903) %>%
+  group_by(id) %>%
+  summarise(
+    ingreso_hogar = sum(ing_indiv, na.rm = TRUE),
+    nper = first(nper),
+    Ingtotug = ingreso_hogar / nper
+  ) %>%
+  mutate(Pobre = ifelse(Ingtotug <= 289878.2, 1, 0)) %>%
+  select(id, Pobre)
 ```
 
+```{r}
+write.csv(df_pred, "pred2903.csv", row.names = FALSE)
+```
+Intento de ajustar el modelo con glmnet
+```{r}
+#library(glmnet)
+#
+#y <- bd_modelo_d$Ingtot
+#
+#X <- model.matrix(~Ingtot + Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
+#  educ + grado_escolar + ocupado + ocu_sem_pas +  oficio + tenure +
+#  cargo + horas_extra + primas +  bonificaciones + alimentacion + aux_transporte +
+#  sub_familiar + sub_educ + ie_alimentacion + ie_vivienda + trans_empresa +    
+#  ie_otros + prima_servicios + prima_navidad + prima_vacaciones + viaticos +
+#  bono_anual + hr_lab + empleados_empresa + cotiz_pension + segundo_trabajo +
+#  hr_lab2 + cargo2 + interes_mas_hr + intent_mas_hr + dispon_mas_hr +
+#  primer_trabajo + dispon_nuevo_trab + cargo_anterior +  
+#  ingreso_anterior + ing_arriendo + ing_pension + ing_alimentos + remesa_nal +
+#  remesa_ext + ayudas + ing_int + ing_otros + cuartos + dormitorios +
+#  cuota_amort + estim_arriendo, bd_modelo_d) 
+#
+#X <- X[, -1]
+#
+#modelo_lambda <- cv.glmnet(X, y, alpha = 0.03)  # Cambia alpha según tu necesidad
+#
+## Obtener el mejor lambda
+#best_lambda <- modelo_lambda$lambda.min
+#print(best_lambda)
+```
 # 1. INTRODUCCIÓN
 
 ## +Rúbrica+++++++++++++++
