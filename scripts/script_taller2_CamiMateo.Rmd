@@ -19,7 +19,9 @@ p_load(
   caret,
   glmnet,
   Metrics,
-  skimr
+  skimr,
+  ranger, 
+  caret
   )
 ```
 
@@ -37,10 +39,31 @@ hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
 personas_te <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
 ```
 
+Creación de partición con datos de training para facilitar el ejercicio de predicción antes de cargar intentos a Kaggle
+```{r}
+set.seed(3003)
+
+# Validation set con 20% datos de prueba y 80% datos de entrenamiento 
+inTrain <- createDataPartition( # Método de caret para establecer validation set aleatoriamente elegido
+  y = hogares_tr$Pobre,  # Variable explicada
+  p = .80, # Porcentaje de datos para entrenamiento
+  list = FALSE
+)
+
+hogares_train <- hogares_tr %>% 
+  filter(row_number() %in% inTrain)
+
+hogares_validation  <- hogares_tr %>% 
+  filter(!row_number() %in% inTrain)
+```
+
 ```{r}
 # Tabla training
 bd_train <- personas_tr %>%
-  left_join(hogares_tr, join_by("id", "Clase", "Dominio", "Fex_c", "Depto", "Fex_dpto"))
+  right_join(hogares_train, join_by("id", "Clase", "Dominio", "Fex_c", "Depto", "Fex_dpto"))
+
+bd_validation <- personas_tr %>%
+  right_join(hogares_validation, join_by("id", "Clase", "Dominio", "Fex_c", "Depto", "Fex_dpto"))
 
 # Tabla test
 bd_test <- personas_te %>%
@@ -51,6 +74,142 @@ bd_test <- personas_te %>%
 
 ```{r}
 bd_train <- bd_train %>%
+  select(
+    "id",
+    "Clase",
+    "Dominio", # Ciudad
+    "Depto",
+    "Nper", # Número de personas por hogar
+    "P6020", # Sexo 1 hombre, 2 mujer
+    "P6040", # Edad
+    "P6090", # Cotizante en salud
+    "P6100", # Tipo de regimen de SS en salud
+    "P6210", # Nivel educativo
+    "P6210s1", # Grado escolar aprobado
+    "Oc", # Ocupado 1
+    "Ina", # Inactivo 1
+    "Lp", # Línea de pobreza
+    "P6240", # Actividad de la semana anterior
+    "Oficio", # Tipo de ocupación
+    "P6426", # Tiempo laborando en la empresa
+    "P6430", # Cargo desempeñado en el trabajo
+    "P6510", # Dicótoma: ingresos por horas extra
+    "P6545", # Dicótoma: ingresos por primas
+    "P6580", # Dicótoma: ingresos por bonificaciones
+    "P6585s1", # Dicótoma: ingresos por alimentación
+    "P6585s2", # Dicótoma: ingresos por subsidio de transporte
+    "P6585s3", # Dicótoma: ingresos por subsidio familiar
+    "P6585s4", # Dicótoma: ingresos por subsidio educativo
+    "P6590",  # Dicótoma: ingresos en especie con alimentación
+    "P6600", # Dicótoma: ingresos en especie con vivienda
+    "P6610", # Dicótoma: usa transporte de la empresa para desplazarse al trabajo   
+    "P6620", # Dicótoma: otros ingresos en especie
+    "P6630s1", # Dicótoma: ingresos por prima de servicios últimos 12 meses
+    "P6630s2", # Dicótoma: ingresos por prima de navidad últimos 12 meses
+    "P6630s3", # Dicótoma: ingresos por prima de vacaciones últimos 12 meses
+    "P6630s4", # Dicótoma: ingresos por viáticos permanentes últimos 12 meses
+    "P6630s6", # Dicótoma: ingresos por bonificaciones anuales últimos 12 meses
+    "P6800", # Horas laboradas durante la última semana
+    "P6870", # Categórica sobre cantidad de empleados en la empresa
+    "P6920", # Cotiza a fondo de pensiones
+    "P7040", # Dicótoma: desempeña una actividad secundaria
+    "P7045", # Horas laboradas durante la última semana en actividad secundaria
+    "P7050", # Tipo de ocupación en el segundo trabajo
+    "P7090", # Dicótoma: tiene interés en trabajar más horas
+    "P7110", # Dicótoma: ha intentado trabajar más horas en el último mes
+    "P7120", # Dicótoma: tiene disponibilidad para trabajar más horas
+    "P7150", # Dicótoma: ha buscado trabajo durante las últimas 4 semanas
+    "P7160", # Dicótoma: puede comenzar un nuevo empleo dentro del mes siguiente
+    "P7310", # Dicótoma: ha trabajado antes durante por lo menos 2 semanas
+    "P7350", # Cargo que ocupaba en su anterior trabajo (desocupados)
+    "P7472", # Ha tenido ingresos durante el mes anterior (desocupados) 
+    "P7495", # Dicótoma: recibió ingresos por arriendos el mes pasado
+    "P7500s2", # Dicótoma: recibió ingresos por pensión el mes pasado
+    "P7500s3", # Dicótoma: recibió ingresos por pensión alimenticia el mes pasado
+    "P7510s1", # Dicótoma: recibió ingresos de otros hogares nacionales el mes pasado
+    "P7510s2", # Dicótoma: recibió ingresos de otros hogares extranjeros el mes pasado
+    "P7510s3", # Dicótoma: recibió ingresos de instituciones el mes pasado
+    "P7510s6", # Dicótoma: recibió ingresos de intereses o dividendos el mes pasado
+    "P7510s7", # Dicótoma: recibió ingresos de otras fuentes el mes pasado
+    "Ingtot", # Ingreso total # No está en test 
+    
+    # Características del hogar
+    "P5000", # Cantidad de cuartos en el hogar
+    "P5010", # Cantidad de cuartos usados como dormitorios
+    "P5090", # La vivienda es propia, arrendada, usufructuada, etc.
+    "P5100", # Valor de la cuota de amortización
+    "P5130", # Estimación del valor de habitar la vivienda en caso de ser arrendada
+    "P5140", # Valor del arriendo
+    
+     # Variables de resultado
+    "Pobre", # Pobre 1, de lo contrario 0 (Variable dependiente en training)
+    "Ingtotug", # Ingreso per capita de la unidad de gasto (hogar) (Variable dependiente en training)
+    
+    # Variables secundarias
+    #"Estrato1", # No está en test
+    #"Impa", # Ingreso primera actividad # No está en test
+    #"Impaes", # Ingreso primera actividad imputado # No está en test
+    #"Isa", # Ingreso segunda actividad # No está en test
+    #"Isaes", # Ingreso segunda actividad # No está en test
+    #"Ie", # Ingreso en especie # No está en test
+    #"Iees", # Ingreso en especie imputado # No está en test
+    #"Imdi", # Ingreso de desempleados e inactivos # No está en test
+    #"Imdies", # Ingreso de desempleados e inactivos imputado # No está en test
+    #"Iof1", # Ingreso por intereses y dividendos # No está en test
+    #"Iof1es", # Ingreso por intereses y dividendos imputado # No está en test
+    #"Iof2", # Ingreso por pensión # No está en test
+    #"Iof2es", # Ingreso por pensión imputado # No está en test
+    #"Iof3h", # Ingreso por ayudas de hogares # No está en test
+    #"Iof3hes", # Ingreso por ayudas de hogares imputado # No está en test
+    #"Iof3i", # Ingreso por instituciones # No está en test
+    #"Iof3ies", # Ingreso por instituciones imputado # No está en test
+    #"Iof6", # Ingreso por arriendos # No está en test
+    #"Iof6es", # Ingreso por arriendos imputado # No está en test
+    
+    # En test aparecen las dicótomas sobre si recibe o no ingresos por los siguientes conceptos
+    #"P6500", # Ingresos recibidos # No está en test
+    #"P6510s1", # Ingresos por horas extras # No está en test
+    #"P6510s2", # Reportó o no el ingreso por horas extras # No está en test
+    #"P6545s1", # Ingresos por primas # No está en test
+    #"P6545s2", # Reportó o no el ingreso por primas # No está en test
+    #"P6580s1", # Ingresos por bonificaciones      # No está en test
+    #"P6580s2", # Reportó o no el ingreso por bonificaciones # No está en test
+    #"P6585s1a1", # Subsidio de alimentación # No está en test
+    #"P6585s1a2", # Reportó o no el subsidio de alimentación # No está en test
+    #"P6585s2a1", # Auxilio de transporte  # No está en test
+    #"P6585s2a2", # Reportó o no el auxilio de transporte # No está en test
+    #"P6585s3a1", # Subsidio familiar    # No está en test
+    #"P6585s3a2", # Reportó o no el subsidio familiar # No está en test
+    #"P6585s4a1", # Subsidio educativo    # No está en test
+    #"P6585s4a2", # Reportó o no el subsidio educativo # No está en test
+    #"P6590s1", # Pago en especie con alimentos # No está en test
+    #"P6600s1", # Pago en especie con vivienda # No está en test
+    #"P6610s1", # Valor estimado de transporte prestado por la empresa # No está en test
+    #"P6620s1", # Valor de pagos en especie con otros elementos # No está en test
+    #"P6630s1a1", # Valor prima de servicios ultimos 12 meses # No está en test
+    #"P6630s2a1", # Valor prima de navidad últimos 12 meses # No está en test
+    #"P6630s3a1", # Valor prima de vacaciones últimos 12 meses # No está en test
+    #"P6630s4a1", # Valor de los viaticos permanentes últimos 12 meses # No está en test
+    #"P6630s6a1", # Valor de las bonificaciones anuales # No está en test
+    #"P6750", # Ganancia neta del negocio # No está en test
+    #"P6760", # Cantidad de meses a los que corresponde ese ingreso # No está en test
+    #"P6870", # Cantidad de personas en la empresa # No está en test
+    #"P6920", # Cotiza a fondo de pensiones # No está en test
+    #"P7070", # Ingresos por segundo trabajo # No está en test
+    #"P7500s1a1", # Ingresos recibidos por arriendos # No está en test
+    #"P7500s2a1", # Ingresos por pensiones # No está en test
+    #"P7500s3a1", # Ingresos por pensión alimentaria # No está en test
+    #"P7510s1a1", # Ingresos provenientes de otros hogares en los últimos 12 meses # No está en test
+    #"P7510s2a1", # Remesas en los últimos 12 meses # No está en test
+    #"P7510s3a1", # Ayudas de instituciones en los últimos 12 meses # No está en test
+    #"P7510s5a1", # Ingresos financieros en los últimos 12 meses # No está en test
+    #"P7510s6a1", # Ingresos cesantías en los últimos 12 meses # No está en test
+    #"P7510s7a1", # Otros ingresos anuales # No está en test
+  )
+```
+
+```{r}
+bd_validation <- bd_validation %>%
   select(
     "id",
     "Clase",
@@ -468,6 +627,35 @@ bd_train <- bd_train %>%
   mutate(across(all_of(cols_to_factor), as.factor))
 ```
 
+Limpieza de la partición para validación
+```{r}
+bd_validation <- bd_validation %>%
+  rename_with(~ rename_dict[.x], .cols = names(rename_dict))
+
+bd_validation <- bd_validation %>%
+  mutate(female = ifelse(female==2, 1, 0)) %>%
+  mutate(reg_salud = ifelse(reg_salud==9, 4, reg_salud)) %>%
+  mutate(educ = ifelse(educ==9, 1, educ))
+
+bd_validation <- unos_ceros(bd_validation, lista_unos_ceros)
+
+bd_validation <- bd_validation %>%
+  mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(educ = replace_na(educ, 1)) %>%
+  mutate(empleados_empresa = replace_na(empleados_empresa, 1)) %>%
+  mutate(ocu_sem_pas = replace_na(ocu_sem_pas, 2)) %>%
+  mutate(cotiz_pension = replace_na(cotiz_pension, 2)) %>%
+  mutate(reg_salud = replace_na(reg_salud, 4)) %>%
+  mutate(viv_prop = replace_na(viv_prop, 6)) %>%
+  mutate(cargo = replace_na(cargo, 9))  %>%
+  mutate(cargo2 = replace_na(cargo2, 9)) %>%
+  mutate(cargo_anterior = replace_na(cargo_anterior, 9)) %>%
+  mutate(oficio = replace_na(oficio, 99))
+
+bd_validation <- bd_validation %>%
+  mutate(across(all_of(cols_to_factor), as.factor))
+```
+
 ## Limpieza de la BD test
 
 ```{r}
@@ -713,22 +901,144 @@ Nico y Javier: Logistic Regression, CART, Boosting
 ## Pruebas MATEO
 
 ```{r}
+model_form2a <- Ingtot ~ 
+  Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
+  educ + poly(age, 2, raw=TRUE):educ + grado_escolar + ocupado + ocu_sem_pas + oficio + 
+  poly(age, 2, raw=TRUE):oficio + tenure + cargo + aux_transporte + primer_trabajo + 
+  ing_arriendo + remesa_nal + remesa_ext + ayudas + ing_int + ing_otros +
+  educ:bono_anual + hr_lab + empleados_empresa + cotiz_pension + cuartos + dormitorios +
+  cuota_amort + estim_arriendo
+  # horas_extra + primas +  bonificaciones + alimentacion + ie_otros +
+  # sub_familiar + sub_educ + ie_alimentacion + ie_vivienda + trans_empresa +    
+  # prima_servicios + prima_navidad + prima_vacaciones + viaticos +
+  # segundo_trabajo + hr_lab2 + cargo2 + interes_mas_hr + intent_mas_hr + dispon_mas_hr +
+  # dispon_nuevo_trab + cargo_anterior + ingreso_anterior + ing_pension + ing_alimentos +
+```
+Modelo de regresión
+```{r}
+bd_train <- na.omit(bd_train)
+
+# Implementción de elastic net para determinar los predictores más relevantes y sus coeficientes
+set.seed(3003)
+
+fitControl <- trainControl( 
+  method = "cv",
+  number = 5)
+
+tune_grid <- expand.grid(
+  alpha=c(0.046, 0.047, 0.048),
+  lambda=c(1550, 1600, 1650)
+  )
+
+model2a <- train(
+  model_form2a,
+  data=bd_train,
+  method='glmnet',
+  trControl=fitControl,
+  tuneGrid=tune_grid
+)
+
+```
+
+
+```{r}
+prediccion_3003 <- predict(model2a, newdata=bd_test)
+```
+
+
+```{r}
+df_pred <- bd_validation %>%
+  select(id, Pobre) %>%
+  mutate(Pobre_hat = ifelse(prediccion_3003 <= 289878.2, 1, 0))
+```
+
+
+```{r}
+#install.packages("MLmetrics")
+#
+#library(MLmetrics)
+
+F1_Score(y_pred = df_pred$Pobre_hat, y_true = df_pred$Pobre, positive = "1")
+```
+
+Intento de Random Forest
+```{r}
+model_tree1 <- Pobre ~ 
+  Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
+  educ + grado_escolar + ocupado + ocu_sem_pas +  oficio + tenure +
+  cargo + horas_extra + primas +  bonificaciones + alimentacion + aux_transporte +
+  sub_familiar + sub_educ + ie_alimentacion + ie_vivienda + trans_empresa +    
+  ie_otros + prima_servicios + prima_navidad + prima_vacaciones + viaticos +
+  bono_anual + hr_lab + empleados_empresa + cotiz_pension + segundo_trabajo +
+  hr_lab2 + cargo2 + interes_mas_hr + intent_mas_hr + dispon_mas_hr +
+  primer_trabajo + dispon_nuevo_trab + cargo_anterior +  
+  ingreso_anterior + ing_arriendo + ing_pension + ing_alimentos + remesa_nal +
+  remesa_ext + ayudas + ing_int + ing_otros + cuartos + dormitorios +
+  cuota_amort + estim_arriendo
+```
+
+
+```{r}
+set.seed(3003)
+
+fitControl <- trainControl( 
+  method = "cv",
+  number = 5)
+
+tree_grid <- expand.grid(
+    mtry = c(3, 4, 5),
+    splitrule = "gini",
+    min.node.size = c(10, 25, 50)
+)
+
+tree_model1 <- train(
+    model_tree1,  # Fórmula del modelo
+    data = bd_train,  # Dataset de entrenamiento
+    method = "ranger",  # Usamos el motor ranger para Random Forests
+    trControl = fitControl,  # Especificamos los controles de validación cruzada definidos antes
+    tuneGrid = tree_grid,
+    num.trees = 100,
+    importance = "impurity"  # Calculamos la importancia de variables por permutación
+)
+```
+
+
+```{r}
+# Imprimir el modelo entrenado
+print(tree_model1)
+
+# Visualizar el desempeño en función del número de árboles
+plot(tree_model1)
+
+# Hacer predicciones en el conjunto de prueba
+predictions <- predict(tree_model1, bd_test)
+
+# Evaluar el desempeño con matriz de confusión
+conf_matrix <- confusionMatrix(predictions, bd_validation$Pobre)
+print(conf_matrix)
+
+df_pred <- bd_validation %>%
+  select(id) %>%
+  mutate(Pobre = predictions)
+
+F1_Score(y_pred = df_pred$Pobre_hat, y_true = df_pred$Pobre, positive = "1")
+```
+
+
+```{r}
 df_pred <- bd_test %>%
-  select(id, nper) %>%
-  as.data.frame() %>%
-  mutate(ing_indiv = !!prediction1) %>%
+  select(id) %>%
+  mutate(Pobre = as.numeric(!!predictions)) %>%
   group_by(id) %>%
   summarise(
-    ingreso_hogar = sum(ing_indiv, na.rm = TRUE),
-    nper = first(nper),
-    Ingtotug = ingreso_hogar / nper
+    Pobre = sum(Pobre, na.rm = TRUE)
   ) %>%
-  mutate(Pobre = ifelse(Ingtotug <= 289878.2, 1, 0)) %>%
+  mutate(Pobre = ifelse(Pobre >= 3, 1, 0)) %>%
   select(id, Pobre)
 ```
 
 ```{r}
-write.csv(df_pred, "pred1_gr6.csv", row.names = FALSE)
+write.csv(df_pred, "RF_mtry_5_split_gini_node_25_trees_100", row.names = FALSE)
 ```
 
 ## Pruebas CAMILA
@@ -793,13 +1103,6 @@ Each submission file should contain two columns: `id` and `pobre`. `id`
 is the household-level id, and `pobre` is the binary prediction.
 
 The file should contain a header and have the following format:
-
-```{r}
-
-# id,pobre 
-# 14cb43ab34e121bafc292d45,    0 
-# 7fa50f6bd6d6a6c0d7f6f57c,    1 
-```
 
 # 99. DOCUMENTO Y REPOSITORIO
 
