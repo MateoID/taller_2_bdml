@@ -28,7 +28,7 @@ p_load(
 ## Carga de datos y joints
 
 ```{r}
-raw_data_path <- '../raw_data'
+raw_data_path <- '../data'
 
 # Datos training
 hogares_tr <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
@@ -39,7 +39,9 @@ hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
 personas_te <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
 ```
 
-Creación de partición con datos de training para facilitar el ejercicio de predicción antes de cargar intentos a Kaggle
+Creación de partición con datos de training para facilitar el ejercicio
+de predicción antes de cargar intentos a Kaggle
+
 ```{r}
 set.seed(3003)
 
@@ -628,6 +630,7 @@ bd_train <- bd_train %>%
 ```
 
 Limpieza de la partición para validación
+
 ```{r}
 bd_validation <- bd_validation %>%
   rename_with(~ rename_dict[.x], .cols = names(rename_dict))
@@ -690,7 +693,9 @@ cols_to_factor_test <- setdiff(cols_to_factor, "Pobre")
 bd_test <- bd_test %>%
   mutate(across(all_of(cols_to_factor_test), as.factor))
 ```
+
 Especificación modelo 1a
+
 ```{r}
 model_form1a <- Ingtot ~ 
   Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
@@ -729,7 +734,9 @@ fitControl <- trainControl(
 #  tuneGrid=tune_grid
 #)
 ```
+
 Especificación modelo 1b
+
 ```{r}
 model_form1e <- Ingtot ~ 
   Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
@@ -744,7 +751,9 @@ model_form1e <- Ingtot ~
   remesa_ext + ayudas + ing_int + ing_otros + cuartos + dormitorios +
   cuota_amort + estim_arriendo
 ```
+
 Modelo de regresión
+
 ```{r}
 bd_train <- na.omit(bd_train)
 
@@ -770,7 +779,9 @@ model1b <- train(
   tuneGrid=tune_grid
 )
 ```
+
 Predicción usando el modelo1b con los valores de alpha y lambda óptimos
+
 ```{r}
 prediccion_2903 <- predict(model1e, newdata=bd_test)
 
@@ -791,7 +802,9 @@ df_pred <- bd_test %>%
 ```{r}
 write.csv(df_pred, "pred2903.csv", row.names = FALSE)
 ```
+
 Intento de ajustar el modelo con glmnet
+
 ```{r}
 #library(glmnet)
 #
@@ -817,6 +830,7 @@ Intento de ajustar el modelo con glmnet
 #best_lambda <- modelo_lambda$lambda.min
 #print(best_lambda)
 ```
+
 # 1. INTRODUCCIÓN
 
 ## +Rúbrica+++++++++++++++
@@ -914,7 +928,9 @@ model_form2a <- Ingtot ~
   # segundo_trabajo + hr_lab2 + cargo2 + interes_mas_hr + intent_mas_hr + dispon_mas_hr +
   # dispon_nuevo_trab + cargo_anterior + ingreso_anterior + ing_pension + ing_alimentos +
 ```
+
 Modelo de regresión
+
 ```{r}
 bd_train <- na.omit(bd_train)
 
@@ -940,18 +956,15 @@ model2a <- train(
 
 ```
 
-
 ```{r}
 prediccion_3003 <- predict(model2a, newdata=bd_test)
 ```
-
 
 ```{r}
 df_pred <- bd_validation %>%
   select(id, Pobre) %>%
   mutate(Pobre_hat = ifelse(prediccion_3003 <= 289878.2, 1, 0))
 ```
-
 
 ```{r}
 #install.packages("MLmetrics")
@@ -962,6 +975,7 @@ F1_Score(y_pred = df_pred$Pobre_hat, y_true = df_pred$Pobre, positive = "1")
 ```
 
 Intento de Random Forest
+
 ```{r}
 model_tree1 <- Pobre ~ 
   Clase + Dominio + Depto + nper + female + age + coti_salud + reg_salud + 
@@ -976,7 +990,6 @@ model_tree1 <- Pobre ~
   remesa_ext + ayudas + ing_int + ing_otros + cuartos + dormitorios +
   cuota_amort + estim_arriendo
 ```
-
 
 ```{r}
 set.seed(3003)
@@ -1002,7 +1015,6 @@ tree_model1 <- train(
 )
 ```
 
-
 ```{r}
 # Imprimir el modelo entrenado
 print(tree_model1)
@@ -1023,7 +1035,6 @@ df_pred <- bd_validation %>%
 
 F1_Score(y_pred = df_pred$Pobre_hat, y_true = df_pred$Pobre, positive = "1")
 ```
-
 
 ```{r}
 df_pred <- bd_test %>%
