@@ -957,10 +957,28 @@ model2a <- train(
 ```
 
 ```{r}
-prediccion_3003 <- predict(model2a, newdata=bd_test)
+prediccion_104 <- predict(model2a, newdata=bd_test)
+
+df_pred <- bd_test %>%
+  select(id, nper) %>%
+  as.data.frame() %>%
+  mutate(ing_indiv = !!prediccion_104) %>%
+  group_by(id) %>%
+  summarise(
+    ingreso_hogar = sum(ing_indiv, na.rm = TRUE),
+    nper = first(nper),
+    Ingtotug = ingreso_hogar / nper
+  ) %>%
+  mutate(lp = hogares_te$Lp) %>%
+  mutate(Pobre = ifelse(Ingtotug < lp, 1, 0)) %>%
+  select(id, Pobre)
+
+write.csv(df_pred, "enet_lambda_1550_alpha_0.46.csv", row.names = FALSE)
 ```
 
 ```{r}
+prediccion_3003 <- predict(model2a, newdata=bd_test)
+
 df_pred <- bd_validation %>%
   select(id, Pobre) %>%
   mutate(Pobre_hat = ifelse(prediccion_3003 <= 289878.2, 1, 0))
