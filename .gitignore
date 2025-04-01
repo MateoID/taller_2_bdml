@@ -39,5 +39,4 @@ Temporary Items
 *.icloud
 
 # ignorando la data del proyecto
-data/*.txt
 data/*.csv
