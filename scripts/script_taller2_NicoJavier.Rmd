@@ -37,6 +37,84 @@ hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
 personas_te <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
 ```
 
+## Exploración general de la base
+
+### Revisión de las bases de hogares
+
+Esta revisión es vital porque las predicciones de pobreza se hacen a
+nivel de hogar. Necesitamos saber, en general, que grupo de variables
+están y no están en el data_train y en el data_test (En la descripción
+de la data, se aclara que este hallazgo es una acción deliberada, luego
+debemos tener cuidado aquí).
+
+```{r}
+
+# para construir un diccionario de variables simple
+colnames(hogares_te)
+colnames(hogares_tr)
+
+# Para ver la distribución general de los datos de HOGARES QUE SON LOS MÁS IMPORTANTES
+skim(hogares_tr)
+
+```
+
+### Línea de pobreza
+
+```{r}
+# reisando la línea de indigenci
+summary(hogares_tr$Lp)
+```
+
+Esto nos muestra que la línea de pobreza cambia para cada hogar. Esto
+hace que para las predicciones de ingreso directamente, sea necesario
+trabajar con estas líneas de pobreza y no usar una línea standar para
+todos. Aquí creo que se necesita un DF aparte con los ID de hogares y su
+línea de pobreza para unirlo al final con las predicciones de ingreso
+por familia.
+
+### Variable pobreza
+
+```{r}
+
+skim(hogares_tr$Pobre)
+```
+
+La descripción de esta variable nos permite ver que la proporción de
+pobreza en los hogares es del 20%. esto es importante para saber si
+debemos usar alguna estrategia de balanceo. Es claro que no hay problema
+en que no tengamos esta variable en el DF de test.
+
+### Comparación de variables diferentes entre DF train y test
+
+Para esto se puede revisar el diccionario de datos creado para comparar
+los datasets de train y test. Pero pareciera que todas estas variables
+se pueden construir usando la base de datos de personas.
+
+![](images/clipboard-1551488232.png)
+
+## Proceso de generación de data
+
+Hay que partir de las bases de familias, y luego traemos variables de
+las bases de personas seleccionando teóricamente lo más importante de
+personas. Para esto es importante hacer algún análisis si es posible
+para saber cuales son las variables más importnates o hacerlo de forma
+teórica.
+
+Siguiente paso:
+
+1.  Entender los diferentes ingresos y las variables requeridas para
+    determinar pobreza en estos datos.
+2.  Hay que hacer esta mismo ejercicio con las bases de personas, pero
+    en principio, deberíamos usar solo las variables disponibles en
+    ambos datasets (train and test). A menos, que podamos calcular
+    variables no disponibles en test a partir de las que sí están
+    disponibles.
+
+Preguntas:
+
+1.  Creo que hay que generar las variables que no tenemos usando como
+    referencia la base de personas.
+
 ```{r}
 # Tabla training
 bd_train <- personas_tr %>%
