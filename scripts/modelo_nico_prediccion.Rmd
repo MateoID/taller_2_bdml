@@ -99,9 +99,11 @@ personas_agg_te <- merge(personas_agg_te, ocupaciones_agg_te, by = "id", all.x =
 # Unir con datos de hogares
 test <- merge(hogares_te, personas_agg_te, by = "id", all.x = TRUE)
 
+variables_modelo_te <- setdiff(variables_modelo, "Pobre")
+
 setDT(test)
 
-test <- test[, .SD, .SDcols = c("id", variables_modelo)]
+test <- test[, .SD, .SDcols = c("id", variables_modelo_te)]
 ```
 ```{r}
 # Convertir Pobre a factor (necesario para classification)
@@ -128,9 +130,9 @@ boost_model <- xgboost(
 ```
 
 ```{r}
-test_numeric <- test[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo[-1]]
+test_numeric <- test[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo_te]
 test_matrix <- xgb.DMatrix(
-  data = as.matrix(test_numeric[, variables_modelo[-1], with = FALSE])
+  data = as.matrix(test_numeric[, variables_modelo_te, with = FALSE])
 )
 
 boost_pred <- predict(boost_model, newdata = test_matrix)
