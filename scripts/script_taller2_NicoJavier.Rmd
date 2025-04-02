@@ -19,7 +19,9 @@ p_load(
   caret,
   glmnet,
   Metrics,
-  skimr
+  skimr,
+  xgboost,
+  biglm
   )
 ```
 
@@ -35,6 +37,113 @@ personas_tr <- read.csv(file.path(raw_data_path, 'train_personas.csv'))
 # Datos test
 hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
 personas_te <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
+```
+
+```{r}
+
+hogares_tr <- fread(file.path(raw_data_path, 'train_hogares.csv'))
+personas_tr <- fread(file.path(raw_data_path, 'train_personas.csv'))
+hogares_te <- fread(file.path(raw_data_path, 'test_hogares.csv'))
+personas_te <- fread(file.path(raw_data_path, 'test_personas.csv'))
+
+# Asegurar que 'id' es de tipo carácter para la unión eficiente
+hogares_tr[, id := as.character(id)]
+personas_tr[, id := as.character(id)]
+hogares_te[, id := as.character(id)]
+personas_te[, id := as.character(id)]
+```
+```{r}
+setDT(personas_tr)
+for (val in unique(personas_tr$P6430)) {
+  personas_tr[, paste0("P6430_", val) := as.integer(P6430 == val)]
+}
+
+# Lista de ingresos pasivos
+ingresos_cols <- c("P7495", "P7500s2", "P7500s3", "P7505")
+
+# Agregar por 'id'
+personas_agg <- personas_tr[, .(
+  pct_mujeres = mean(P6020 == 2, na.rm = TRUE),  # % de mujeres
+  edad_media = mean(P6040, na.rm = TRUE),        # Media de edad
+  pct_contributivo = mean(P6100 %in% c(1, 2), na.rm = TRUE),  # % afiliados a contributivo o especial
+  educacion_hogar = max(P6210, na.rm = TRUE),    # Nivel educativo máximo en el hogar
+  tenure_promedio = mean(P6426, na.rm = TRUE),   # Promedio de tenure
+  pct_trabajo_secundario = mean(P7040 == 1, na.rm = TRUE),  # % con segundo trabajo
+  ingresos_pasivos = rowSums(.SD, na.rm = TRUE), # Suma de ingresos pasivos
+  personas_trabajando = sum(Oc == 1, na.rm = TRUE),  # Cantidad de ocupados
+  personas_pet = sum(Pet == 1, na.rm = TRUE)     # Personas en edad de trabajar
+), by = id, .SDcols = ingresos_cols]
+
+# Agregar ocupaciones
+ocupaciones_agg <- personas_tr[, lapply(.SD, sum, na.rm = TRUE), by = id, .SDcols = patterns("^P6430_")]
+
+personas_agg <- merge(personas_agg, ocupaciones_agg, by = "id", all.x = TRUE)
+
+# Unir con datos de hogares
+train <- merge(hogares_tr, personas_agg, by = "id", all.x = TRUE)
+
+# Seleccionar variables relevantes y manejar valores NA
+variables_modelo <- c("Pobre", "Depto", "pct_mujeres", "edad_media", "pct_contributivo",
+                      "educacion_hogar", "tenure_promedio", "pct_trabajo_secundario",
+                      "ingresos_pasivos", "personas_trabajando", "personas_pet",
+                      grep("^P6430_", names(train), value = TRUE))
+
+train <- train[, .SD, .SDcols = c("id", variables_modelo)]
+
+# Convertir Pobre a factor (necesario para classification)
+train[, Pobre := as.factor(Pobre)]
+
+set.seed(123)
+train_index <- createDataPartition(train$Pobre, p = 0.8, list = FALSE)
+train_data <- train[train_index]
+val_data <- train[-train_index]
+
+# Preparar fórmula para modelos
+formula <- as.formula(paste("Pobre ~", paste(setdiff(variables_modelo, "Pobre"), collapse = " + ")))
+
+# Regresión Logística
+log_model <- glm(formula, data = train_data, family = binomial())
+
+# CART (Árbol de Decisión)
+cart_model <- rpart(formula, data = train_data, method = "class")
+
+# Boosting con XGBoost
+# Preparar matrices para XGBoost
+train_matrix <- xgb.DMatrix(
+  data = as.matrix(train_data[, variables_modelo[-1], with = FALSE]),
+  label = as.numeric(train_data$Pobre) - 1
+)
+
+val_matrix <- xgb.DMatrix(
+  data = as.matrix(val_data[, variables_modelo[-1], with = FALSE]),
+  label = as.numeric(val_data$Pobre) - 1
+)
+
+# Entrenar modelo XGBoost
+boost_model <- xgboost(
+  data = train_matrix,
+  max.depth = 6,
+  nrounds = 100,
+  objective = "binary:logistic",
+  verbose = 0
+)
+
+# Hacer predicciones
+log_pred <- predict(log_model, newdata = val_data, type = "response")
+cart_pred <- predict(cart_model, newdata = val_data, type = "class")
+boost_pred <- predict(boost_model, newdata = val_matrix)
+
+# Convertir predicciones a factores
+log_pred_factor <- factor(ifelse(log_pred > 0.5, 1, 0), levels = c(0, 1))
+boost_pred_factor <- factor(ifelse(boost_pred > 0.5, 1, 0), levels = c(0, 1))
+
+# Evaluar modelos
+#0.647
+confusionMatrix(log_pred_factor, val_data$Pobre)
+#0.573
+confusionMatrix(as.factor(cart_pred), val_data$Pobre)
+#0.719
+confusionMatrix(boost_pred_factor, val_data$Pobre)
 ```
 
 ## Exploración general de la base
