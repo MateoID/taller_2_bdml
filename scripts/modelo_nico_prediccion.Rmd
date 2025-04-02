@@ -1,0 +1,152 @@
+---
+title: "prueba"
+output: null
+date: "2025-04-02"
+---
+
+```{r}
+require(pacman)
+
+p_load(
+  tidyverse,
+  caret,
+  glmnet,
+  Metrics,
+  skimr,
+  xgboost,
+  biglm,
+  data.table
+  )
+```
+
+## Carga de datos y joints
+
+```{r}
+raw_data_path <- '/Users/mid96/Desktop/Big Data & Machine Learning/Taller 2 BD & ML/taller_2_bdml/raw_data/'
+
+hogares_tr <- read_csv(file.path(raw_data_path, 'train_hogares.csv'))
+personas_tr <- read_csv(file.path(raw_data_path, 'train_personas.csv'))
+hogares_te <- read_csv(file.path(raw_data_path, 'test_hogares.csv'))
+personas_te <- read_csv(file.path(raw_data_path, 'test_personas.csv'))
+```
+
+```{r}
+setDT(personas_tr)
+for (val in unique(personas_tr$P6430)) {
+  personas_tr[, paste0("P6430_", val) := as.integer(P6430 == val)]
+}
+
+# Lista de ingresos pasivos
+ingresos_cols <- c("P7495", "P7500s2", "P7500s3", "P7505")
+
+# Agregar por 'id'
+personas_agg <- personas_tr[, .(
+  pct_mujeres = mean(P6020 == 2, na.rm = TRUE),  # % de mujeres
+  edad_media = mean(P6040, na.rm = TRUE),        # Media de edad
+  pct_contributivo = mean(P6100 %in% c(1, 2), na.rm = TRUE),  # % afiliados a contributivo o especial
+  educacion_hogar = max(P6210, na.rm = TRUE),    # Nivel educativo máximo en el hogar
+  tenure_promedio = mean(P6426, na.rm = TRUE),   # Promedio de tenure
+  pct_trabajo_secundario = mean(P7040 == 1, na.rm = TRUE),  # % con segundo trabajo
+  ingresos_pasivos = rowSums(.SD, na.rm = TRUE), # Suma de ingresos pasivos
+  personas_trabajando = sum(Oc == 1, na.rm = TRUE),  # Cantidad de ocupados
+  personas_pet = sum(Pet == 1, na.rm = TRUE)     # Personas en edad de trabajar
+), by = id, .SDcols = ingresos_cols]
+
+# Agregar ocupaciones
+ocupaciones_agg <- personas_tr[, lapply(.SD, sum, na.rm = TRUE), by = id, .SDcols = patterns("^P6430_")]
+
+personas_agg <- merge(personas_agg, ocupaciones_agg, by = "id", all.x = TRUE)
+
+# Unir con datos de hogares
+train <- merge(hogares_tr, personas_agg, by = "id", all.x = TRUE)
+
+# Seleccionar variables relevantes y manejar valores NA
+variables_modelo <- c("Pobre", "Depto", "pct_mujeres", "edad_media", "pct_contributivo",
+                      "educacion_hogar", "tenure_promedio", "pct_trabajo_secundario",
+                      "ingresos_pasivos", "personas_trabajando", "personas_pet",
+                      grep("^P6430_", names(train), value = TRUE))
+
+setDT(train)
+
+train <- train[, .SD, .SDcols = c("id", variables_modelo)]
+```
+
+
+```{r}
+setDT(personas_te)
+for (val in unique(personas_te$P6430)) {
+  personas_te[, paste0("P6430_", val) := as.integer(P6430 == val)]
+}
+
+# Agregar por 'id'
+personas_agg_te <- personas_te[, .(
+  pct_mujeres = mean(P6020 == 2, na.rm = TRUE),  # % de mujeres
+  edad_media = mean(P6040, na.rm = TRUE),        # Media de edad
+  pct_contributivo = mean(P6100 %in% c(1, 2), na.rm = TRUE),  # % afiliados a contributivo o especial
+  educacion_hogar = max(P6210, na.rm = TRUE),    # Nivel educativo máximo en el hogar
+  tenure_promedio = mean(P6426, na.rm = TRUE),   # Promedio de tenure
+  pct_trabajo_secundario = mean(P7040 == 1, na.rm = TRUE),  # % con segundo trabajo
+  ingresos_pasivos = rowSums(.SD, na.rm = TRUE), # Suma de ingresos pasivos
+  personas_trabajando = sum(Oc == 1, na.rm = TRUE),  # Cantidad de ocupados
+  personas_pet = sum(Pet == 1, na.rm = TRUE)     # Personas en edad de trabajar
+), by = id, .SDcols = ingresos_cols]
+
+# Agregar ocupaciones
+ocupaciones_agg_te <- personas_te[, lapply(.SD, sum, na.rm = TRUE), by = id, .SDcols = patterns("^P6430_")]
+
+personas_agg_te <- merge(personas_agg_te, ocupaciones_agg_te, by = "id", all.x = TRUE)
+
+# Unir con datos de hogares
+test <- merge(hogares_te, personas_agg_te, by = "id", all.x = TRUE)
+
+setDT(test)
+
+test <- test[, .SD, .SDcols = c("id", variables_modelo)]
+```
+```{r}
+# Convertir Pobre a factor (necesario para classification)
+train[, Pobre := as.factor(Pobre)]
+
+set.seed(123)
+
+# Boosting con XGBoost
+# Preparar matrices para XGBoost
+train_numeric <- train[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo[-1]]
+train_matrix <- xgb.DMatrix(
+  data = as.matrix(train_numeric),
+  label = as.numeric(train$Pobre) - 1
+)
+
+# Entrenar modelo XGBoost
+boost_model <- xgboost(
+  data = train_matrix,
+  max.depth = 6,
+  nrounds = 100,
+  objective = "binary:logistic",
+  verbose = 0
+)
+```
+
+```{r}
+test_numeric <- test[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo[-1]]
+test_matrix <- xgb.DMatrix(
+  data = as.matrix(test_numeric[, variables_modelo[-1], with = FALSE])
+)
+
+boost_pred <- predict(boost_model, newdata = test_matrix)
+
+# boost_pred_factor <- factor(ifelse(boost_pred > 0.5, 1, 0), levels = c(0, 1))
+
+df_pred <- personas_te %>%
+  select(id) %>%
+  mutate(prob_pobre = boost_pred) %>%
+  group_by(id) %>%
+  summarise(prob = mean(prob_pobre), .groups = "drop") %>%
+  mutate(Pobre = ifelse(prob > 0.5, 1, 0)) %>%
+  select(id, Pobre)
+
+```
+
+```{r}
+write.csv(df_pred, "boosting_depth6_rounds100.csv", row.names = FALSE)
+```
