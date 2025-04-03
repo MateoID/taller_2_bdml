@@ -7,11 +7,13 @@ editor_options:
     wrap: 72
 ---
 
-# 0. CONFIGURACIÓN
+# 0. CONFIGURACIÓN INICIAL
 
 ## Librerias
 
 ```{r}
+
+#rm(list = ls())
 require(pacman)
 
 p_load(
