@@ -1,0 +1,522 @@
+---
+title: "script_taller2"
+output: null
+date: "2025-03-19"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# 0. CONFIGURACIÓN
+
+## Librerias
+
+```{r, warning=FALSE}
+require(pacman)
+
+p_load(
+  tidyverse,
+  caret,
+  glmnet,
+  Metrics,
+  skimr,
+  xgboost,
+  biglm
+  )
+```
+
+## Carga de datos y joints
+
+### Carga bases originales
+
+```{r}
+raw_data_path <- '../data'
+
+# Datos training
+hogares_tr_raw <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
+personas_tr_raw <- read.csv(file.path(raw_data_path, 'train_personas.csv'))
+
+# Datos test
+hogares_te_raw <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
+personas_te_raw <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
+
+```
+
+### Dejando solo las variables comunes entre bases de hogares
+
+```{r}
+# Obteniendo los nombres de las columnas comunes
+vars_comunes <- intersect(names(hogares_tr_raw), names(hogares_te_raw))
+
+# Agregando la variable pobre a la lista de las que voy a conservar
+vars_comunes <- unique(c(vars_comunes, "Pobre"))
+
+# Filtrando el df de hogares_tr  
+hogares_tr <- hogares_tr_raw[, vars_comunes, drop = FALSE]
+
+# Creando un df copia del raw para no tener que cargar los datos si se modifica por error
+hogares_te <- hogares_te_raw
+```
+
+### Dejando solo las variables comunes entre bases de personas
+
+```{r}
+# Obteniendo los nombres de las columnas comunes
+vars_comunes <- intersect(names(personas_tr_raw), names(personas_te_raw))
+
+# Filtrando el df de hogares_tr  
+personas_tr <- personas_tr_raw[, vars_comunes, drop = FALSE]
+
+# Creando un df copia del raw para no tener que cargar los datos si se modifica por error
+personas_te <- personas_te_raw
+```
+
+### Trabajando sobre las variables personas para obtener variables de hogares
+
+**Variable de afiliación a salud:**
+
+Para la variable de afiliación a salud, el enfoque de existencia(1 en
+hogar si uno de los sujetos es afiliado) es apropiado porque:
+
+-   El acceso a salud suele ser un derecho familiar (si uno tiene
+    cobertura, beneficia a todos)
+
+-   Es binario por naturaleza (el hogar tiene o no tiene acceso)
+
+-   Se alinea con cómo se miden estos indicadores en política social
+
+En este caso se codifica 1 al hogar si tiene algún integrante afiliado
+al régimen contributivo o especial.
+
+```{r personas_tr-P6100}
+
+# Variable afiliación a régimen de salud
+# Creando la variable a nivel persona
+metricas_regimen <- personas_tr %>%
+  mutate(afil_contrib_excep = if_else(P6100 %in% c(1, 2), 1, 0))
+
+#Agregando por hogar
+metricas_regimen <- metricas_regimen %>%
+  group_by(id) %>%
+  summarise(
+    afil_salud_trabajo = as.numeric(any(afil_contrib_excep == 1))
+  ) %>%
+  ungroup()
+
+# Uniendo con el dataframe principal
+hogares_tr <- hogares_tr %>%
+  left_join(metricas_regimen, by = "id")
+# table(is.na(hogares_tr$afil_salud_trabajo)) # verificación de NAs de la nueva variable
+```
+
+```{r personas_te-P6100}
+
+# Variable afiliación a régimen de salud
+# Creando la variable a nivel persona
+metricas_regimen <- personas_te %>%
+  mutate(afil_contrib_excep = if_else(P6100 %in% c(1, 2), 1, 0))
+
+#Agregando por hogar
+metricas_regimen <- metricas_regimen %>%
+  group_by(id) %>%
+  summarise(
+    afil_salud_trabajo = as.numeric(any(afil_contrib_excep == 1))
+  ) %>%
+  ungroup()
+
+# Uniendo con el dataframe principal
+hogares_te <- hogares_te %>%
+  left_join(metricas_regimen, by = "id")
+# table(is.na(hogares_tr$afil_salud_trabajo)) # verificación de NAs de la nueva variable
+```
+
+**Variable posiciones en el trabajo (P6430):**
+
+-   Enfoque de Dominancia (Posición Laboral Principal) Identifica la
+    categoría más frecuente en cada hogar
+
+    -   Útil para clasificar el "perfil laboral predominante" del hogar
+
+    -   En caso de empate, toma la primera categoría (puedes
+        personalizar esto)
+
+    Enfoque de Existencia (Indicadores Binarios) Crea variables dummy
+    para posiciones estratégicas:
+
+    -   Empleado público (estabilidad)
+
+    -   Patrón (capacidad de generación de empleo y acceso a mayores
+        recursos)
+
+    -   Cuenta propia (informalidad/emprendimiento)
+
+    -   Jornalero (vulnerabilidad)
+
+    -   Sin remuneración (precariedad extrema)
+
+    Enfoque de Diversidad Cuenta posiciones laborales distintas
+
+    -   Hogares con mayor diversidad pueden tener:
+
+    -   Múltiples fuentes de ingresos (positivo)
+
+    -   Estrategias de supervivencia complejas (negativo)
+
+```{r personas_tr-P6430}
+# Creando todas las métricas laborales en una sola operación
+metricas_laborales <- personas_tr %>%
+  # Filtrando casos válidos (opcional)
+  filter(!is.na(P6430)) %>%
+  
+  # Agrupando por hogar
+  group_by(id) %>%
+  
+  summarise(
+    # ENFOQUE 1: Dominancia (posición laboral más frecuente)
+    posicion_lab_dominante = {
+      tab <- sort(table(P6430), decreasing = TRUE)
+      as.numeric(names(tab)[1])  # Extrae la categoría más frecuente
+    },
+    
+    # ENFOQUE 2: Existencia (variables binarias para posiciones clave)
+    tiene_empleado_publico = as.numeric(any(P6430 == 2)),
+    tiene_patron = as.numeric(any(P6430 == 5)),
+    tiene_cuenta_propia = as.numeric(any(P6430 == 4)),
+    tiene_emp_domestico = as.numeric(any(P6430 == 3)),
+    tiene_jornalero = as.numeric(any(P6430 == 8)),
+    tiene_sin_remuneracion = as.numeric(any(P6430 %in% c(6, 7))),
+    
+    # ENFOQUE 3: Diversidad (variedad de posiciones laborales)
+    n_posiciones_lab_distintas = n_distinct(P6430),
+    
+    # Eliminando grupos residuales
+    .groups = 'drop'
+  ) %>%
+  
+  # Asegurando que los NA se conviertan en 0 en las variables binarias
+  mutate(across(starts_with("tiene_"), ~replace_na(., 0)))
+
+# Uniendo con el dataframe principal
+hogares_tr <- hogares_tr %>%
+  left_join(metricas_laborales, by = "id")
+
+# Ajustando los NAs (familias que no tienen personas con ninguna de estas condiciones)
+# Reemplazar NAs en variables binarias
+hogares_tr <- hogares_tr %>%
+  mutate(across(
+    starts_with("tiene_"),
+    ~replace_na(., 0)
+  ))
+
+# Para variables numéricas
+hogares_tr <- hogares_tr %>%
+  mutate(
+    n_posiciones_lab_distintas = replace_na(n_posiciones_lab_distintas, 0),
+    posicion_lab_dominante = ifelse(is.na(posicion_lab_dominante), 
+                                   99, 
+                                   posicion_lab_dominante)
+  )
+```
+
+```{r personas_te-P6430}
+# Creando todas las métricas laborales en una sola operación
+metricas_laborales <- personas_te %>%
+  # Filtrando casos válidos (opcional)
+  filter(!is.na(P6430)) %>%
+  
+  # Agrupando por hogar
+  group_by(id) %>%
+  
+  summarise(
+    # ENFOQUE 1: Dominancia (posición laboral más frecuente)
+    posicion_lab_dominante = {
+      tab <- sort(table(P6430), decreasing = TRUE)
+      as.numeric(names(tab)[1])  # Extrae la categoría más frecuente
+    },
+    
+    # ENFOQUE 2: Existencia (variables binarias para posiciones clave)
+    tiene_empleado_publico = as.numeric(any(P6430 == 2)),
+    tiene_patron = as.numeric(any(P6430 == 5)),
+    tiene_cuenta_propia = as.numeric(any(P6430 == 4)),
+    tiene_emp_domestico = as.numeric(any(P6430 == 3)),
+    tiene_jornalero = as.numeric(any(P6430 == 8)),
+    tiene_sin_remuneracion = as.numeric(any(P6430 %in% c(6, 7))),
+    
+    # ENFOQUE 3: Diversidad (variedad de posiciones laborales)
+    n_posiciones_lab_distintas = n_distinct(P6430),
+    
+    # Eliminando grupos residuales
+    .groups = 'drop'
+  ) %>%
+  
+  # Asegurando que los NA se conviertan en 0 en las variables binarias
+  mutate(across(starts_with("tiene_"), ~replace_na(., 0)))
+
+# Uniendo con el dataframe principal
+hogares_te <- hogares_te %>%
+  left_join(metricas_laborales, by = "id")
+
+# Ajustando los NAs (familias que no tienen personas con ninguna de estas condiciones)
+# Reemplazar NAs en variables binarias
+hogares_te <- hogares_te %>%
+  mutate(across(
+    starts_with("tiene_"),
+    ~replace_na(., 0)
+  ))
+
+# Para variables numéricas
+hogares_te <- hogares_te %>%
+  mutate(
+    n_posiciones_lab_distintas = replace_na(n_posiciones_lab_distintas, 0),
+    posicion_lab_dominante = ifelse(is.na(posicion_lab_dominante), 
+                                   99, 
+                                   posicion_lab_dominante)
+  )
+```
+
+**Variable prima de navidad**
+
+Estas variables capturan diferentes aspectos de la misma variable.
+Mientras la variable binaria tiene un enfoque de existencia, las
+versiones cuantitativas permiten analizar intensidad o desigualdad
+intrafamiliar. Las tres variables capturan distintos aspectos de la
+recepción de prima de navidad en el hogar:
+
+-   **`recibio_prima_navidad`** (binaria) identifica si *al menos un
+    miembro* recibió el beneficio (enfoque de existencia), lo que señala
+    acceso a prestaciones laborales formales en el hogar que pueden
+    indicar alto ingresos.
+
+-   **`n_recibio_prima`** (cuantitativa) cuenta *cuántos miembros* lo
+    recibieron, indicando la extensión del beneficio dentro del hogar.
+
+-   **`prop_recibio_prima`** (proporción) muestra *qué porcentaje* de
+    los miembros con datos válidos accedieron al beneficio, útil para
+    comparar hogares de distintos tamaños.
+
+```{r personas_tr-P6630s1}
+
+# Creando las variables de prima
+metricas_prima <- personas_tr %>%
+  # Filtrando casos válidos
+  filter(!is.na(P6630s1)) %>%
+  
+  # Agrupando por hogar  
+  group_by(id) %>%
+  summarise(
+    # Versión básica (algún miembro recibió prima)
+    recibio_prima_navidad = as.numeric(any(P6630s1 == 1)),
+    
+    # Versión detallada
+    n_recibio_prima = sum(P6630s1 == 1),  # Cantidad de personas que recibieron
+    prop_recibio_prima = mean(P6630s1 == 1), # Proporción de personas que recibieron
+    
+    .groups = 'drop'
+  )
+
+# Uniendo con el dataframe principal
+hogares_tr <- hogares_tr %>%
+  left_join(metricas_prima, by = "id")
+
+# Ajustando los valores NA
+hogares_tr <- hogares_tr %>%
+  mutate(
+    recibio_prima_navidad = replace_na(recibio_prima_navidad, 0),
+    n_recibio_prima = replace_na(n_recibio_prima, 0),
+    prop_recibio_prima = replace_na(prop_recibio_prima, 0),
+  )
+
+```
+
+```{r personas_te-P6630s1}
+
+# Creando las variables de prima
+metricas_prima <- personas_te %>%
+  # Filtrando casos válidos
+  filter(!is.na(P6630s1)) %>%
+  
+  # Agrupando por hogar  
+  group_by(id) %>%
+  summarise(
+    # Versión básica (algún miembro recibió prima)
+    recibio_prima_navidad = as.numeric(any(P6630s1 == 1)),
+    
+    # Versión detallada
+    n_recibio_prima = sum(P6630s1 == 1),  # Cantidad de personas que recibieron
+    prop_recibio_prima = mean(P6630s1 == 1), # Proporción de personas que recibieron
+    
+    .groups = 'drop'
+  )
+
+# Uniendo con el dataframe principal
+hogares_te <- hogares_te %>%
+  left_join(metricas_prima, by = "id")
+
+# Ajustando los valores NA
+hogares_te <- hogares_te %>%
+  mutate(
+    recibio_prima_navidad = replace_na(recibio_prima_navidad, 0),
+    n_recibio_prima = replace_na(n_recibio_prima, 0),
+    prop_recibio_prima = replace_na(prop_recibio_prima, 0),
+  )
+```
+
+**Variable de cotización a fondo de pensiones**
+
+Las variables generadas capturan distintos niveles de información sobre
+la afiliación al sistema de pensiones en cada hogar:
+
+1.  **`cotiza_pension` (binaria)**: Indica si *al menos un miembro* del
+    hogar está cotizando actualmente (valor 1), lo que refleja acceso al
+    sistema formal de seguridad social.
+
+2.  **`n_cotiza_pension` (cuantitativa)**: Cuenta *cuántos miembros*
+    cotizan activamente, permitiendo medir la amplitud de la cobertura
+    dentro del hogar (por ejemplo, hogares donde múltiples integrantes
+    tienen empleos formales).
+
+3.  **`prop_cotiza_pension` (proporción)**: Muestra el *porcentaje de
+    miembros* que cotizan (frente al total con datos válidos), útil para
+    comparar hogares de distintos tamaños (ej: un hogar con 1/4 miembros
+    que cotiza vs. otro con 3/5).
+
+4.  **`n_no_cotiza` (cuantitativa)**: Complementa el análisis indicando
+    cuántos miembros *no* cotizan, lo que puede señalar informalidad
+    laboral o exclusión del sistema.
+
+Estas variables combinadas permiten evaluar no solo la
+presencia/ausencia de cotización, sino también su *intensidad* y
+*desigualdad intrafamiliar*. Los `NA` se tratan como "no cotiza" (0)
+para evitar pérdida de datos.
+
+```{r personas_tr-P6920}
+# Creando las variables de cotización a pensiones
+metricas_pension <- personas_tr %>%
+  # Filtrando casos válidos (excluyendo NAs)
+  filter(!is.na(P6920)) %>%
+  
+  # Agrupando por hogar (usando ID_hogar como llave)
+  group_by(id) %>%
+  summarise(
+    # Versión básica (algún miembro cotiza)
+    cotiza_pension = as.numeric(any(P6920 == 1)),
+    
+    # Versión detallada
+    n_cotiza_pension = sum(P6920 == 1),  # Cantidad de personas que cotizan
+    prop_cotiza_pension = mean(P6920 == 1), # Proporción que cotiza
+    
+    .groups = 'drop'
+  )
+
+# Uniendo con el dataframe principal
+hogares_tr <- hogares_tr %>%
+  left_join(metricas_pension, by = "id")
+
+# Ajustando los valores NA (asumiendo NA = no cotiza)
+hogares_tr <- hogares_tr %>%
+  mutate(
+    across(
+      c(cotiza_pension, n_cotiza_pension, prop_cotiza_pension),
+      ~replace_na(., 0)
+  ))
+```
+
+```{r personas_te-P6920}
+# Creando las variables de cotización a pensiones
+metricas_pension <- personas_te %>%
+  # Filtrando casos válidos (excluyendo NAs)
+  filter(!is.na(P6920)) %>%
+  
+  # Agrupando por hogar (usando ID_hogar como llave)
+  group_by(id) %>%
+  summarise(
+    # Versión básica (algún miembro cotiza)
+    cotiza_pension = as.numeric(any(P6920 == 1)),
+    
+    # Versión detallada
+    n_cotiza_pension = sum(P6920 == 1),  # Cantidad de personas que cotizan
+    prop_cotiza_pension = mean(P6920 == 1), # Proporción que cotiza
+    
+    .groups = 'drop'
+  )
+
+# Uniendo con el dataframe principal
+hogares_te <- hogares_te %>%
+  left_join(metricas_pension, by = "id")
+
+# Ajustando los valores NA (asumiendo NA = no cotiza)
+hogares_te <- hogares_te %>%
+  mutate(
+    across(
+      c(cotiza_pension, n_cotiza_pension, prop_cotiza_pension),
+      ~replace_na(., 0)
+  ))
+```
+
+**Variable de transferencias y otros ingresos**
+
+La variable generada captura información sobre la recepción de
+transferencias monetarias y otros ingresos no laborales en el hogar:
+
+1.  **`recibio_otros_ingresos` (binaria)**: Identifica si *al menos un
+    miembro* del hogar recibió ingresos adicionales (transferencias,
+    intereses, dividendos o cesantías), lo que puede indicar redes de
+    apoyo económico o activos financieros.
+
+```{r personas_tr-P7505}
+# Creando las variables de transferencias e ingresos adicionales
+metricas_transferencias <- personas_tr %>%
+  # Filtrando casos válidos (excluyendo NAs)
+  filter(!is.na(P7505)) %>%
+  
+  # Agrupando por hogar
+  group_by(id) %>%
+  summarise(
+    # Versión básica (algún miembro recibió ingresos adicionales)
+    recibio_otros_ingresos = as.numeric(any(P7505 == 1)),
+    
+    .groups = 'drop'
+  )
+
+# Uniendo con el dataframe principal
+hogares_tr <- hogares_tr %>%
+  left_join(metricas_transferencias, by = "id")
+
+# Ajustando los valores NA (asumiendo NA = no recibió)
+hogares_tr <- hogares_tr %>%
+  mutate(
+    across(
+      c(recibio_otros_ingresos),
+      ~replace_na(., 0)
+    )
+  )
+```
+
+```{r personas_te-P7505}
+# Creando las variables de transferencias e ingresos adicionales
+metricas_transferencias <- personas_te %>%
+  # Filtrando casos válidos (excluyendo NAs)
+  filter(!is.na(P7505)) %>%
+  
+  # Agrupando por hogar
+  group_by(id) %>%
+  summarise(
+    # Versión básica (algún miembro recibió ingresos adicionales)
+    recibio_otros_ingresos = as.numeric(any(P7505 == 1)),
+    
+    .groups = 'drop'
+  )
+
+# Uniendo con el dataframe principal
+hogares_te <- hogares_te %>%
+  left_join(metricas_transferencias, by = "id")
+
+# Ajustando los valores NA (asumiendo NA = no recibió)
+hogares_te <- hogares_te %>%
+  mutate(
+    across(
+      c(recibio_otros_ingresos),
+      ~replace_na(., 0)
+    )
+  )
+```
