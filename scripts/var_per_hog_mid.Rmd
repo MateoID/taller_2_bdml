@@ -1,0 +1,234 @@
+---
+title: "script_pred_CamiMateo"
+output: html_document
+date: "2025-04-03"
+---
+
+```{r}
+require(pacman)
+
+p_load(
+  tidyverse,
+  caret,
+  glmnet,
+  Metrics,
+  skimr,
+  ranger, 
+  caret
+  )
+```
+
+## Carga de datos y joints
+
+```{r}
+raw_data_path <- '../raw_data'
+
+# Datos training
+hogares_tr <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
+personas_tr <- read.csv(file.path(raw_data_path, 'train_personas.csv'))
+
+# Datos test
+hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
+personas_te <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
+```
+
+Limpieza y agrupación de datos para personas train
+```{r}
+personas_tr <- personas_tr %>%
+  select(
+    "id", 
+    "P6040",
+    "P6426",
+    "P6585s2",
+    "P6630s1",
+    "P7500s2",
+    "Oc"
+  )
+
+cols_cero <- c(
+  "P6426",
+  "P6585s2",
+  "P6630s1",
+  "P7500s2",
+  "Oc"
+  )
+
+# Ajuste de variables categoricas para llenar NA con valores correspondientes
+personas_tr <- personas_tr %>%
+  mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(P6585s2 = ifelse(P6585s2==1, 1, 0)) %>%
+  mutate(P6630s1 = ifelse(P6630s1==1, 1, 0)) %>%
+  mutate(P7500s2 = ifelse(P7500s2==1, 1, 0))
+
+# Agregación de valores para volver la bd de personas compatible con la de hogares
+personas_tr <- personas_tr %>%
+  group_by(id) %>%
+  summarise(
+    # Suma de edad de miembros para luego dividirla entre Nper de hogar y sacar promedio
+    edad_total = sum(P6040),
+    # Calculo de promedio de antigüedad entre los miembros del hogar con valores > 0.
+    suma_antiguedad = sum(P6426[P6426 > 0]),
+    num_miembros = sum(P6426 > 0),
+    promedio_antiguedad = ifelse(num_miembros > 0, suma_antiguedad / num_miembros, NA),
+    aux_trans = ifelse(sum(P6585s2) > 0, 1, 0),
+    prima_serv = ifelse(sum(P6630s1) > 0, 1, 0),
+    pension = ifelse(sum(P7500s2) > 0, 1, 0),
+    ocupado = ifelse(sum(Oc) > 0, 1, 0)
+    )
+```
+
+Limpieza y agrupación de datos para personas test
+```{r}
+personas_te <- personas_te %>%
+  select(
+    "id", 
+    "P6040",
+    "P6426",
+    "P6585s2",
+    "P6630s1",
+    "P7500s2",
+    "Oc"
+  )
+
+# Ajuste de variables categoricas para llenar NA con valores correspondientes
+personas_te <- personas_te %>%
+  mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(P6585s2 = ifelse(P6585s2==1, 1, 0)) %>%
+  mutate(P6630s1 = ifelse(P6630s1==1, 1, 0)) %>%
+  mutate(P7500s2 = ifelse(P7500s2==1, 1, 0))
+
+# Agregación de valores para volver la bd de personas compatible con la de hogares
+personas_te <- personas_te %>%
+  group_by(id) %>%
+  summarise(
+    # Suma de edad de miembros para luego dividirla entre Nper de hogar y sacar promedio
+    edad_total = sum(P6040),
+    # Calculo de promedio de antigüedad entre los miembros del hogar con valores > 0.
+    suma_antiguedad = sum(P6426[P6426 > 0]),
+    num_miembros = sum(P6426 > 0),
+    promedio_antiguedad = ifelse(num_miembros > 0, suma_antiguedad / num_miembros, NA),
+    aux_trans = ifelse(sum(P6585s2) > 0, 1, 0),
+    prima_serv = ifelse(sum(P6630s1) > 0, 1, 0),
+    pension = ifelse(sum(P7500s2) > 0, 1, 0),
+    ocupado = ifelse(sum(Oc) > 0, 1, 0)
+    )
+```
+
+
+```{r}
+# Tabla test
+bd_train <- hogares_tr %>%
+  left_join(personas_tr, join_by("id"))
+
+# Tabla test
+bd_test <-hogares_te %>%
+  left_join(personas_te, join_by("id"))
+```
+
+
+```{r}
+# Limpieza bd consolidada hogares train
+cols_cero_hogar <- c(
+  "promedio_antiguedad",    
+  "P5100", # Valor de la cuota de amortización
+  "P5130", # Estimación del valor de habitar la vivienda en caso de ser arrendada
+  "P5140" # Valor del arriendo
+)
+
+bd_train <- bd_train %>%
+  mutate(edad_prom = edad_total / Nper) %>%
+  mutate(across(all_of(cols_cero_hogar), ~ replace_na(., 0))) %>%
+  select(-c(
+    Npersug, 
+    Ingtotugarr, 
+    Ingpcug, 
+    Li, 
+    Indigente,
+    Npobres, 
+    Nindigentes, 
+    Fex_c, 
+    Fex_dpto, 
+    edad_total, 
+    suma_antiguedad, 
+    num_miembros
+    ))
+
+cols_factor <- c(
+  "Clase",
+  "Dominio",
+  "P5090",
+  "Pobre",               
+  "Depto",
+  "aux_trans",           
+  "prima_serv",          
+  "pension",             
+  "ocupado" 
+)
+
+bd_train <- bd_train %>%
+  mutate(across(cols_factor, as.factor))
+
+# Limpieza bd consolidada hogares test
+bd_test <- bd_test %>%
+  mutate(edad_prom = edad_total / Nper) %>%
+  mutate(across(all_of(cols_cero_hogar), ~ replace_na(., 0))) %>%
+  select(-c(
+    Npersug, 
+    Li,
+    Fex_c, 
+    Fex_dpto, 
+    edad_total, 
+    suma_antiguedad, 
+    num_miembros
+    ))
+
+cols_factor_test <- setdiff(cols_factor, "Pobre")
+
+bd_test <- bd_test %>%
+  mutate(across(cols_factor_test, as.factor))
+```
+
+```{r}
+model_tree <- Pobre ~ 
+  Clase + Dominio + P5000 + P5010 + P5090 + P5100 + P5130 + P5140 + Nper + 
+  Depto + promedio_antiguedad + aux_trans + prima_serv + pension + ocupado + 
+  edad_prom
+```
+
+```{r}
+set.seed(3003)
+
+fitControl <- trainControl( 
+  method = "cv",
+  number = 5)
+
+tree_grid <- expand.grid(
+    mtry = c(3, 8, 15),
+    splitrule = "gini",
+    min.node.size = c(1, 5, 10)
+)
+
+tree_model <- train(
+    model_tree,  # Fórmula del modelo
+    data = bd_train,  # Dataset de entrenamiento
+    method = "ranger",  # Usamos el motor ranger para Random Forests
+    trControl = fitControl,  # Especificamos los controles de validación cruzada definidos antes
+    tuneGrid = tree_grid,
+    num.trees = 250,
+    importance = "impurity"  # Calculamos la importancia de variables por permutación
+)
+```
+
+```{r}
+predictions <- predict(tree_model, bd_test)
+
+df_pred <- bd_test %>%
+  select(id) %>%
+  mutate(Pobre = as.numeric(!!predictions)) %>%
+  mutate(Pobre = ifelse(Pobre==2, 1, 0))
+```
+
+```{r}
+setwd('/Users/mid96/Desktop/Big Data & Machine Learning/Taller 2 BD & ML/taller_2_bdml/raw_data/')
+write.csv(df_pred, "new_rf_mtry_5_split_gini_node_25_trees_100.csv", row.names = FALSE)
+```
