@@ -18,6 +18,7 @@ p_load(
   data.table,
   xgboost
   )
+
 ```
 
 ## Carga de datos y joints
@@ -264,10 +265,10 @@ personas_te <- personas_te %>%
 
 ```{r}
 
-    posicion_lab_dominante = {
-      tab <- sort(table(P6430), decreasing = TRUE, na.last = TRUE)
-      as.numeric(names(tab)[1])
-    }
+    #posicion_lab_dominante = {
+     # tab <- sort(table(P6430), decreasing = TRUE, na.last = TRUE)
+      #as.numeric(names(tab)[1])
+    #}
     
 ```
 
@@ -353,6 +354,18 @@ cols_factor <- c(
 bd_train <- bd_train %>%
   mutate(across(cols_factor, as.factor))
 
+
+#Formato variables de entrenamiento 
+bd_train <- bd_train %>% 
+  rename(
+    num_room = P5000,   
+    num_bed = P5010, 
+    propiedad = P5090, 
+    pago_amort = P5100,
+    renta_h = P5130,
+    renta_r = P5140
+)
+
 # Limpieza bd consolidada hogares test
 bd_test <- bd_test %>%
    mutate(edad_prom = edad_total/Nper) %>%
@@ -372,11 +385,31 @@ cols_factor_test <- setdiff(cols_factor, "Pobre")
 
 bd_test <- bd_test %>%
   mutate(across(cols_factor_test, as.factor))
+
+#Formato de variables de test 
+
+bd_test <- bd_test %>% 
+  rename(
+    num_room = P5000,   
+    num_bed = P5010, 
+    propiedad = P5090, 
+    pago_amort = P5100,
+    renta_h = P5130,
+    renta_r = P5140
+)
+
+#Guardar datos finales para evaluación de modelos 
+write.csv(bd_train, file = "../data/bd_train_limpia.csv", row.names = FALSE)
+write.csv(bd_test, file = "../data/bd_test_limpia.csv", row.names = FALSE)
+
+getwd()
 ```
 
 ```{r}
-variables_modelo <- c("Pobre", "Clase", "Dominio", "P5000", "P5010", "P5090",
-                      "P5100", "P5130", "P5140", "Nper", "Depto", "suma_antiguedad", 
+
+#Selección de variables relevantes
+variables_modelo <- c("Pobre", "Clase", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
                       "promedio_antiguedad", "tiene_empleado_publico",
                       "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
                       "tiene_jornalero", "tiene_sin_remuneracion", 
@@ -386,14 +419,13 @@ variables_modelo <- c("Pobre", "Clase", "Dominio", "P5000", "P5010", "P5090",
                       "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
                       "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
 
+#Preparación de la base de entrenamiento
 setDT(bd_train)
-
 train <- bd_train[, .SD, .SDcols = c("id", variables_modelo)]
 
+#Preparación del conjunto de prueba 
 variables_modelo_te <- setdiff(variables_modelo, "Pobre")
-
 setDT(bd_test)
-
 test <- bd_test[, .SD, .SDcols = c("id", variables_modelo_te)]
 ```
 
@@ -423,6 +455,7 @@ boost_model <- xgboost(
 
 
 ```{r}
+#Evaluación del modelo en la base de test
 test <- na.omit(test)
 
 test_numeric <- test[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo_te]
@@ -441,8 +474,9 @@ df_pred <- bd_test %>%
 
 
 ```{r}
-model_tree <- Pobre ~ Clase + Dominio + P5000 + P5010 + P5090 + P5100 + P5130 + 
-  P5140 + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
+#Entrenamiento de modelo de Random Forest
+model_tree <- Pobre ~ Clase + Dominio + num_room + num_bed + propiedad + pago_amort + renta_h + 
+  renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
   tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
   tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion + 
   n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav + 
@@ -452,6 +486,8 @@ model_tree <- Pobre ~ Clase + Dominio + P5000 + P5010 + P5090 + P5100 + P5130 +
 ```
 
 ```{r}
+
+#Entrenamiento y definición de hiperparámetros para el modelo de Random Forest
 set.seed(404)
 
 fitControl <- trainControl( 
@@ -476,6 +512,7 @@ tree_model <- train(
 ```
 
 ```{r}
+#Predicciones del modelo de Random Forest 
 predictions <- predict(tree_model, bd_test)
 
 df_pred_arbol <- bd_test %>%
@@ -485,6 +522,21 @@ df_pred_arbol <- bd_test %>%
 ```
 
 ```{r}
-setwd('C:\\Users\\misaza\\otros_programas\\taller_2_bdml\\data')
-write.csv(df_pred_arbol, "rf_mtry__node__trees_250.csv", row.names = FALSE)
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+#setwd('C:\\Users\\misaza\\otros_programas\\taller_2_bdml\\data')
+#write.csv(df_pred_arbol, "rf_mtry__node__trees_250.csv", row.names = FALSE)
 ```
