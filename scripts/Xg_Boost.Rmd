@@ -1,0 +1,114 @@
+---
+title: "Untitled"
+author: "Javier Amaya Nieto"
+date: "2025-04-07"
+output: html_document
+---
+
+```{r}
+require(pacman)
+
+p_load(
+  tidyverse,
+  caret,
+  glmnet,
+  Metrics,
+  MLmetrics,
+  skimr,
+  xgboost,
+  biglm,
+  data.table
+  )
+```
+
+```{r}
+#Cargamos bases de datos 
+raw_data_path <- '../data'
+predictions_path <- '../results/predictions'
+
+# Datos 
+bd_train <- read.csv(file.path(raw_data_path, 'bd_train_limpia.csv'))
+bd_test <- read.csv(file.path(raw_data_path, 'bd_test_limpia.csv'))
+```
+
+
+
+```{r}
+#Selección de variables relevantes
+variables_modelo <- c("Pobre", "Clase", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+#Preparación de la base de entrenamiento
+setDT(bd_train)
+train <- bd_train[, .SD, .SDcols = c("id", variables_modelo)]
+
+#Preparación del conjunto de prueba 
+variables_modelo_te <- setdiff(variables_modelo, "Pobre")
+setDT(bd_test)
+test <- bd_test[, .SD, .SDcols = c("id", variables_modelo_te)]
+```
+
+
+```{r}
+set.seed(123)
+
+train <- na.omit(train)
+
+# Boosting con XGBoost
+# Preparar matrices para XGBoost
+train_numeric <- train[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo[-1]]
+train_matrix <- xgb.DMatrix(
+  data = as.matrix(train_numeric),
+  label = as.numeric(train$Pobre) - 1
+)
+
+# Entrenar modelo XGBoost
+boost_model <- xgboost(
+  data = train_matrix,
+  max.depth = 6,
+  nrounds = 100,
+  objective = "binary:logistic",
+  verbose = 0
+)
+```
+
+```{r}
+#Evaluación del modelo en la base de test
+test <- na.omit(test)
+
+test_numeric <- test[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo_te]
+test_matrix <- xgb.DMatrix(
+  data = as.matrix(test_numeric[, variables_modelo_te, with = FALSE])
+)
+
+boost_pred <- predict(boost_model, newdata = test_matrix)
+
+df_pred <- bd_test %>%
+  select(id) %>%
+  mutate(prob = boost_pred) %>%
+  mutate(Pobre = ifelse(prob > 0.5, 1, 0)) %>%
+  select(id, Pobre)
+
+
+
+# Create descriptive filename
+filename <- sprintf("%s/LR-GLM_10fold_F1optimized_%s.csv", 
+                   predictions_path,
+                   format(Sys.time(), "%Y%m%d_%H%M"))
+
+# 6. Save with proper format
+write.csv(submission, 
+          file = filename,
+          row.names = FALSE,
+          quote = FALSE)
+
+```
+
