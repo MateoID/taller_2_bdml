@@ -1236,6 +1236,83 @@ resultados_mpl <- bd_test[, c("id", "pred_class")]
 # Exportar a CSV (sin índices de fila)
 write.csv(resultados_mpl, "MPL_bayes_05.csv", row.names = FALSE)
 ```
+Modelo Boosting para regresión con bd de personas
+```{r}
+variables_modelo <- c(
+  "Ingtot", "Clase", "Dominio", "Depto", "nper", "female", "age", "coti_salud", 
+  "reg_salud", "educ", "grado_escolar", "ocupado", "ocu_sem_pas", "oficio", "tenure",
+  "cargo", "horas_extra", "primas", "bonificaciones", "alimentacion", "aux_transporte",
+  "sub_familiar", "sub_educ", "ie_alimentacion", "ie_vivienda", "trans_empresa",
+  "ie_otros", "prima_servicios", "prima_navidad", "prima_vacaciones", "viaticos",
+  "bono_anual", "hr_lab", "empleados_empresa", "cotiz_pension", "segundo_trabajo",
+  "hr_lab2", "cargo2", "interes_mas_hr", "intent_mas_hr", "dispon_mas_hr",
+  "primer_trabajo", "dispon_nuevo_trab", "cargo_anterior", "ingreso_anterior",
+  "ing_arriendo", "ing_pension", "ing_alimentos", "remesa_nal", "remesa_ext",
+  "ayudas", "ing_int", "ing_otros", "cuartos", "dormitorios",
+  "cuota_amort", "estim_arriendo"
+  )
+
+setDT(bd_train)
+
+train <- bd_train[, .SD, .SDcols = c("id", variables_modelo)]
+```
+
+
+```{r}
+train_numeric <- train[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo[-1]]
+
+train_matrix <- xgb.DMatrix(
+  data = as.matrix(train_numeric),
+  label = as.numeric(train$Ingtot) - 1
+)
+
+boost_model <- xgboost(
+  data = train_matrix,
+  max.depth = 4,
+  nrounds = 200,
+  objective = "reg:squarederror",
+  verbose = 0
+)
+```
+
+
+```{r}
+variables_modelo_te <- setdiff(variables_modelo, "Ingtot")
+
+setDT(bd_test)
+
+test <- bd_test[, .SD, .SDcols = c("id", variables_modelo_te)]
+
+test_numeric <- test[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo_te]
+test_matrix <- xgb.DMatrix(
+  data = as.matrix(test_numeric[, variables_modelo_te, with = FALSE])
+)
+
+boost_pred <- predict(boost_model, newdata = test_matrix)
+```
+
+
+```{r}
+personas_te$pred <- boost_pred
+
+df_pred <- personas_te %>%
+  select(id, pred) %>%
+  left_join(hogares_te %>% select(id, Lp, Nper), by="id") %>%
+  group_by(id) %>%
+  summarise(
+    ing_hog = sum(pred),
+    Nper = first(Nper),      # aseguras que uses un valor representativo por hogar
+    Lp = first(Lp), 
+    .groups = "drop") %>%
+  mutate(ing_prom = ing_hog/Nper,
+         Pobre = ifelse(ing_prom <= Lp, 1, 0)
+         ) %>%
+  select(id, Pobre)
+
+setwd('/Users/mid96/Desktop/Big Data & Machine Learning/Taller 2 BD & ML/taller_2_bdml/raw_data')
+write.csv(df_pred, "boosting.reg_depth4_rounds200.csv", row.names = FALSE)
+
+```
 
 ## Pruebas CAMILA
 
