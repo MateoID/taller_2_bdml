@@ -21,9 +21,11 @@ p_load(
   caret,
   glmnet,
   Metrics,
+  MLmetrics,
   skimr,
-  ranger, 
-  caret
+  xgboost,
+  biglm,
+  data.table
   )
 ```
 
@@ -1198,14 +1200,14 @@ sub_train <- bd_train[split_interno, ]
 sub_test  <- bd_train[-split_interno, ]
 
 #Creación del modelo 
-mpl_model <- lm(Pobre ~ Clase + Dominio + num_room + num_bed + propiedad + pago_amort + renta_h + 
+mpl_model <- Pobre ~ Clase + Dominio + num_room + num_bed + propiedad + pago_amort + renta_h + 
   renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
   tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
   tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion + 
   n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav + 
   prima_vac + ind_viaticos + ocupado + ind_oficio + ind_arriendo + pet_trabajo + 
   max_educ + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros + 
-  edad_prom + perc_fem, data = sub_train)
+  edad_prom + perc_fem
 
 summary(mpl_model)
 
@@ -1241,8 +1243,11 @@ Prueba del mpl
 ```{r}
 set.seed(123)
 
+#Omite los valores faltantes
 bd_train <- na.omit(bd_train)
 
+
+#Definicion del modelo
 mpl_model <- Pobre ~ Clase + Dominio + num_room + num_bed + propiedad + pago_amort + renta_h + 
   renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
   tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
@@ -1252,25 +1257,52 @@ mpl_model <- Pobre ~ Clase + Dominio + num_room + num_bed + propiedad + pago_amo
   max_educ + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros + 
   edad_prom + perc_fem
 
+
+#Establecer funcion para e 
+sixStats <- function(data, lev = NULL, model = NULL) {
+  # Calcula las métricas estándar
+  twoClass <- twoClassSummary(data, lev, model)
+  default <- defaultSummary(data, lev, model)
+  
+  # Calcula el F1 Score
+  f1 <- F1_Score(data$obs, data$pred, positive = lev[2])
+  
+  # Combina todas las métricas
+  c(twoClass, default, F1 = f1)
+}
+
+
 fitControl <- trainControl( 
   method = "cv",
+  classProbs = TRUE,
+  savePredictions = TRUE,
+  summaryFunction = sixStats,
   number = 5)
 
 tune_grid <- expand.grid(
-  alpha=c(0.8, 1, 0.02),
-  lambda=c(0, 0.01, 0.005)
+  alpha=c(0.02),
+  lambda=c(0)
   )
 
+bd_estan$Pobre <- as.factor(bd_estan$Pobre)
 bd_train$Pobre <- as.factor(bd_train$Pobre)
+levels(bd_estan$Pobre) <- make.names(levels(bd_train$Pobre))
+levels(bd_train$Pobre) <- c("No", "Si")
 
 modelo_mpl <- train(
   mpl_model,
   data=bd_train,
   method='glmnet',
   trControl=fitControl,
-  tuneGrid=tune_grid
+  tuneGrid=tune_grid, 
+  metric = "F1",       # Optimizar por F1
+  maximize = TRUE,     # Queremos maximizar F1
+  preProcess = c("center", "scale")
 )
 
+
+#Resultado del modelo 
+print(modelo_mpl)
 ```
 
 ```{r}
@@ -1297,6 +1329,48 @@ write.csv(mpl,
           file = filename,
           row.names = FALSE,
           quote=FALSE)
+
+
+
+```
+
+```{r}
+#------------------------ con algunas transformaciones-----------------------------
+set.seed(123)
+
+bd_train <- na.omit(bd_train)
+
+mpl_model <- Pobre ~ Clase + Dominio + num_room + num_bed + propiedad + pago_amort + renta_h + 
+  renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
+  tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
+  tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion + 
+  n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav + 
+  prima_vac + ind_viaticos + ocupado + ind_oficio + ind_arriendo + pet_trabajo + 
+  max_educ + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros + 
+  edad_prom + perc_fem
+
+fitControl <- trainControl( 
+  method = "cv",
+  number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary)
+
+tune_grid <- expand.grid(
+  alpha=c(0.8, 1, 0.02),
+  lambda=c(0, 0.01, 0.005)
+  )
+
+bd_train$Pobre <- as.factor(bd_train$Pobre)
+
+modelo_mpl <- train(
+  mpl_model,
+  data=bd_train,
+  method='glmnet',
+  trControl=fitControl,
+  tuneGrid=tune_grid, 
+  metric='ROC'
+)
+
 ```
 
 ## Pruebas CAMILA
