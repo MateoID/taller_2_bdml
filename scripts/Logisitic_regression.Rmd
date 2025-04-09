@@ -116,7 +116,7 @@ modelo <- train(
 )
 
 # Resultados
-print(modelo)
+print(modelo$results)
 ```
 
 Algunos otros aspectos del modelo:
@@ -124,12 +124,6 @@ Algunos otros aspectos del modelo:
 ```{r}
 # Mostrar todas las métricas almacenadas en el modelo
 print(modelo$resample)
-```
-
-Observando las métricas del modelo
-
-```{r}
-print(modelo$results)
 ```
 
 ### Exportando predicciones
@@ -205,7 +199,7 @@ modelo_lda <- train(
 )
 
 # Resultados
-print(modelo_lda)
+print(modelo_lda$results)
 ```
 
 ```{r}
@@ -242,9 +236,9 @@ write.csv(submission,
           quote = FALSE)
 ```
 
-#Quadratic Discriminant Analysis (QLD)
+##Quadratic Discriminant Analysis (QLD)
 
-### Configurando el train control:
+### Configurando el train control
 
 ```{r}
 sixStats <- function(data, lev = NULL, model = NULL) {
@@ -265,7 +259,7 @@ preProc <- c("center", "scale", "nzv", "corr")
 # 2. Control de entrenamiento revisado
 ctrl_qda <- trainControl(
   method = "cv",
-  number = 10,
+  number = 5,
   summaryFunction = sixStats,
   classProbs = TRUE,
   savePredictions = "final",
@@ -283,13 +277,17 @@ ctrl_qda <- trainControl(
 set.seed(123)
 
 # Primero verificamos las variables
-library(caret)
 nzv <- nearZeroVar(bd_train, saveMetrics = TRUE)
 print(nzv[nzv$nzv, ])  # Ver qué variables podrían causar problemas
 
 # Seleccionamos solo variables informativas
 predictors <- names(bd_train)[!names(bd_train) %in% c("Pobre", "id")]  # Ajustar según tu dataset
 predictors <- predictors[!predictors %in% rownames(nzv[nzv$nzv, ])]
+predictors <- predictors[predictors != "Ingtotug"]
+
+
+# Filtrar bd_test para que solo tenga las variables necesarias para la predicción
+bd_test_filtered <- bd_test[, c("id", predictors)] 
 
 # Fórmula con variables seleccionadas
 formula_qda <- as.formula(paste("Pobre ~", paste(predictors, collapse = " + ")))
@@ -306,7 +304,7 @@ modelo_qda <- train(
 )
 
 # Resultados
-print(modelo_qda)
+print(modelo_qda$results)
 ```
 
 ```{r}
@@ -315,8 +313,9 @@ modelo_qda$resample
 ### Exportando predicciones
 
 ```{r}
-# Obtener predicciones (clases: "No_Pobre" o "Pobre")
-predicciones_clase <- predict(modelo_qda, newdata = bd_test)
+
+# Obtener predicciones del modelo QDA
+predicciones_clase <- predict(modelo_qda, newdata = bd_test_filtered)
 
 # Convertir a 0 y 1 (para el formato de Kaggle)
 predicciones_numericas <- ifelse(predicciones_clase == "No_pobre", 0, 1)
@@ -339,21 +338,352 @@ write.csv(submission,
           quote = FALSE)
 ```
 
+## K-nearest neighbors (KNN)
+
+### Configurando el train control
+```{r}
+sixStats <- function(data, lev = NULL, model = NULL) {
+  # Calcula las métricas estándar
+  twoClass <- twoClassSummary(data, lev, model)
+  default <- defaultSummary(data, lev, model)
+  
+  # Calcula el F1 Score
+  f1 <- F1_Score(data$obs, data$pred, positive = lev[1])
+  
+  # Combina todas las métricas
+  c(twoClass, default, F1 = f1)
+}
+
+# 1. Control de entrenamiento 
+ctrl_knn <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = sixStats,
+  classProbs = TRUE,
+  savePredictions = "final",
+  verboseIter = FALSE,
+  allowParallel = TRUE
+)
+```
 
 
+### Entrenando el modelo
+
+```{r}
+# # asegurando reproducibilidad
+# set.seed(123)
+# 
+# # ES MUY PESADO
+# 
+# # Entrenamiento del modelo
+# modelo_knn <- train(
+#   Pobre ~ Clase + Dominio + num_room +
+#                       num_bed + propiedad + pago_amort + renta_h +
+#                       renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad +
+#                       tiene_empleado_publico + tiene_patron + tiene_cuenta_propia +
+#                       tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion +
+#                       n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav +
+#                       prima_vac + ind_viaticos + ocupado + ind_oficio + ind_arriendo + pet_trabajo +
+#                       max_educ + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros +
+#                       edad_prom + perc_fem,
+#   data = bd_train,
+#   method = "knn",
+#   tuneGrid = expand.grid(k = seq(5, 30, by = 2)),  # Rango más equilibrado
+#   trControl = ctrl_knn,
+#   metric = "F1",
+#   maximize = TRUE,
+#   preProcess = c("center", "scale")
+# )
+# 
+# # Resultados
+# print(modelo_knn)
+```
+
+### Exportando predicciones
+
+```{r}
+
+# # Obtener predicciones del modelo QDA
+# predicciones_clase <- predict(modelo_knn, newdata = bd_test)
+# 
+# # Convertir a 0 y 1 (para el formato de Kaggle)
+# predicciones_numericas <- ifelse(predicciones_clase == "No_pobre", 0, 1)
+# 
+# #Crear CSV para Kaggle
+# submission <- data.frame(
+#   id = bd_test$id,
+#   pobre = predicciones_numericas
+# )
+# 
+# # Create descriptive filename
+# filename <- sprintf("%s/LR-knn_5fold_withF1_%s.csv",
+#                    predictions_path,
+#                    format(Sys.time(), "%Y%m%d_%H%M"))
+# 
+# # 6. Save with proper format
+# write.csv(submission,
+#           file = filename,
+#           row.names = FALSE,
+#           quote = FALSE)
+```
+
+##Balanceo con PSM y GLM-binomial(mejor LR)
+
+### Haciendo el balanceo con PSM 
+```{r}
+library(MatchIt)
+
+# Convertir la variable objetivo a binaria (1 = Pobre, 0 = No pobre)
+bd_train <- bd_train %>%
+  mutate(Pobre_binario = ifelse(Pobre == "Pobre", 1, 0))
+
+# Aplicar PSM (1:1 matching sin reemplazo, método "nearest neighbor")
+psm_model <- matchit(
+  Pobre ~ Clase + Dominio + num_room + 
+                      num_bed + propiedad + pago_amort + renta_h + 
+                      renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
+                      tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
+                      tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion + 
+                      n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav + 
+                      prima_vac + ind_viaticos + ocupado + ind_oficio + ind_arriendo + pet_trabajo + 
+                      max_educ + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros + 
+                      edad_prom + perc_fem,  
+  data = bd_train,
+  method = "nearest",
+  distance = "glm",  # Propensity score con regresión logística
+  ratio = 1,        # 1 no-pobre por cada pobre
+  replace = FALSE   # Sin reemplazo
+)
+
+# Extraer la muestra balanceada
+bd_train_balanced <- match.data(psm_model)
+
+# revisando el balanceo
+summary(psm_model)  # Deberías ver mejora en el balance (ej: menor "Std. Mean Diff.")
+table(bd_train_balanced$Pobre)  # Ahora ~50% pobres y 50% no pobres
+
+```
+
+### Función métricas F1
+
+creando una función personalizada que use el F1 score para elegir el
+mejor modelo.
+
+```{r function_metrics}
+
+sixStats <- function(data, lev = NULL, model = NULL) {
+  # Calcula las métricas estándar
+  twoClass <- twoClassSummary(data, lev, model)
+  default <- defaultSummary(data, lev, model)
+  
+  # Calcula el F1 Score
+  f1 <- F1_Score(data$obs, data$pred, positive = lev[1])
+  
+  # Combina todas las métricas
+  c(twoClass, default, F1 = f1)
+}
 
 
+```
+
+### Ajustando el train control
+
+```{r}
+# Control de entrenamiento
+ctrl <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = sixStats,
+  classProbs = TRUE,      # Necesario para ROC/F1
+  savePredictions = TRUE, # Para calcular métricas
+  verboseIter = FALSE
+)
+```
+
+### Entrenando el modelo
+
+```{r}
+# Declarando la semilla para reproducibilidad
+set.seed(123)  
+
+# Entrenamiento del modelo
+modelo_bal_glm <- train(
+  Pobre ~ Clase + Dominio + num_room + 
+                      num_bed + propiedad + pago_amort + renta_h + 
+                      renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
+                      tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
+                      tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion + 
+                      n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav + 
+                      prima_vac + ind_viaticos + ocupado + ind_oficio + ind_arriendo + pet_trabajo + 
+                      max_educ + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros + 
+                      edad_prom + perc_fem,   
+  data = bd_train,
+  method = "glm",
+  family = binomial(),
+  trControl = ctrl,
+  metric = "F1",       # Optimizar por F1
+  maximize = TRUE,     # Queremos maximizar F1
+  preProcess = c("center", "scale")
+)
+
+# Resultados
+print(modelo_bal_glm$results)
+```
+
+Algunos otros aspectos del modelo:
+
+```{r}
+# Mostrar todas las métricas almacenadas en el modelo
+print(modelo_bal_glm$resample)
+```
 
 
+### Exportando predicciones
+
+Ahora preparamos el archivo de output para subir la predicción de
+pobreza a Kaggle usando la base de test.
+
+```{r}
+# Obtener predicciones (clases: "No_Pobre" o "Pobre")
+predicciones_clase <- predict(modelo_bal_glm, newdata = bd_test)
+
+# Convertir a 0 y 1 (para el formato de Kaggle)
+predicciones_numericas <- ifelse(predicciones_clase == "No_pobre", 0, 1)
+
+#Crear CSV para Kaggle
+submission <- data.frame(
+  id = bd_test$id,
+  pobre = predicciones_numericas
+)
+
+# Create descriptive filename
+filename <- sprintf("%s/LR-GM_bal_5fold_%s.csv", 
+                   predictions_path,
+                   format(Sys.time(), "%Y%m%d_%H%M"))
+
+# 6. Save with proper format
+write.csv(submission, 
+          file = filename,
+          row.names = FALSE,
+          quote = FALSE)
+
+```
+
+## GLM con EN
+
+### Función métricas F1
+
+creando una función personalizada que use el F1 score para elegir el
+mejor modelo.
+
+```{r function_metrics}
+
+sixStats <- function(data, lev = NULL, model = NULL) {
+  # Calcula las métricas estándar
+  twoClass <- twoClassSummary(data, lev, model)
+  default <- defaultSummary(data, lev, model)
+  
+  # Calcula el F1 Score
+  f1 <- F1_Score(data$obs, data$pred, positive = lev[1])
+  
+  # Combina todas las métricas
+  c(twoClass, default, F1 = f1)
+}
 
 
+```
+
+### Ajustando el train control
+
+```{r}
+# Control de entrenamiento
+ctrl <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = sixStats,
+  classProbs = TRUE,      # Necesario para ROC/F1
+  savePredictions = TRUE, # Para calcular métricas
+  verboseIter = FALSE
+)
+```
+
+### Entrenando el modelo
+
+```{r}
+# Declarando la semilla para reproducibilidad
+set.seed(123)  
+
+# Entrenamiento del modelo
+modelo_glm_en <- train(
+  Pobre ~ Clase + Dominio + num_room + 
+                      num_bed + propiedad + pago_amort + renta_h + 
+                      renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
+                      tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
+                      tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion + 
+                      n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav + 
+                      prima_vac + ind_viaticos + ocupado + ind_oficio + ind_arriendo + pet_trabajo + 
+                      max_educ + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros + 
+                      edad_prom + perc_fem,   
+  data = bd_train,
+  method = "glmnet",
+  family = "binomial",
+  trControl = ctrl,
+  preProcess = c("center", "scale"),
+  metric = "F1",       # Optimizar por F1
+  maximize = TRUE,     # Queremos maximizar F1
+  tuneGrid=expand.grid(
+  alpha = seq(0, 1, by = 0.1),  # Valores intermedios entre Ridge y Lasso
+  lambda = 10^seq(-4, 0, length = 20)  # Desde 0.0001 hasta 1
+    )
+)
+
+# Resultados
+print(modelo_glm_en)
+ggplot(modelo_glm_en)  # Gráfico de tuning
+```
+
+```{r}
+print(modelo_glm_en$results)
+```
 
 
+Algunos otros aspectos del modelo:
 
+```{r}
+# Mostrar todas las métricas almacenadas en el modelo
+print(modelo_glm_en$resample)
+```
 
+### Exportando predicciones
 
+Ahora preparamos el archivo de output para subir la predicción de
+pobreza a Kaggle usando la base de test.
 
+```{r}
+# Obtener predicciones (clases: "No_Pobre" o "Pobre")
+predicciones_clase <- predict(modelo_glm_en, newdata = bd_test)
 
+# Convertir a 0 y 1 (para el formato de Kaggle)
+predicciones_numericas <- ifelse(predicciones_clase == "No_pobre", 0, 1)
+
+#Crear CSV para Kaggle
+submission <- data.frame(
+  id = bd_test$id,
+  pobre = predicciones_numericas
+)
+
+# Create descriptive filename
+filename <- sprintf("%s/LR-GLMNET_5fold_F1optimized_%s.csv", 
+                   predictions_path,
+                   format(Sys.time(), "%Y%m%d_%H%M"))
+
+# 6. Save with proper format
+write.csv(submission, 
+          file = filename,
+          row.names = FALSE,
+          quote = FALSE)
+
+```
 
 
 
