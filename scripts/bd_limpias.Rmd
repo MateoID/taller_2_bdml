@@ -364,7 +364,7 @@ bd_train <- bd_train %>%
     pago_amort = P5100,
     renta_h = P5130,
     renta_r = P5140,
-    Clase = Cabecera
+    Cabecera = Clase
 )
 
 # Limpieza bd consolidada hogares test
