@@ -1,0 +1,98 @@
+```{r}
+require(pacman)
+
+p_load(
+  tidyverse,
+  caret,
+  glmnet,
+  Metrics,
+  skimr,
+  xgboost,
+  data.table
+)
+```
+
+```{r}
+raw_data_path <- '../data'
+predictions_path <- '../results/predictions'
+
+bd_train <- fread(file.path(raw_data_path, 'bd_train_limpia.csv'))
+bd_test <- fread(file.path(raw_data_path, 'bd_test_limpia.csv'))
+```
+
+```{r}
+variables_modelo <- c("Pobre", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+# Seleccionar variables relevantes
+train <- bd_train[, .SD, .SDcols = c("id", variables_modelo)]
+test <- bd_test[, .SD, .SDcols = c("id", setdiff(variables_modelo, "Pobre"))]
+
+train[, Pobre := as.factor(Pobre)]
+
+# Preparar matrices para XGBoost
+train_numeric <- train[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo[-1]]
+train_matrix <- xgb.DMatrix(
+  data = as.matrix(train_numeric),
+  label = as.numeric(train$Pobre) - 1
+) 
+```
+```{r}
+set.seed(123)
+boost_model <- xgboost(
+  data = train_matrix,
+  max.depth = 6,
+  nrounds = 500,
+  objective = "binary:logistic",
+  nthread = parallel::detectCores(),
+  verbose = 0
+)
+
+# Predicción sobre test
+test_numeric <- test[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = setdiff(variables_modelo, "Pobre")]
+test_matrix <- xgb.DMatrix(data = as.matrix(test_numeric))
+
+boost_pred <- predict(boost_model, newdata = test_matrix)
+
+df_pred <- test[, .(id)] %>%
+  mutate(prob = boost_pred) %>%
+  mutate(Pobre = ifelse(prob > 0.5, 1, 0)) %>%
+  select(id, Pobre)
+```
+
+```{r}
+train_pred <- predict(boost_model, newdata = train_matrix)
+
+df_pred_train <- train[, .(id, Pobre_real = as.integer(as.character(Pobre)))] %>%
+  mutate(prob = train_pred) %>%
+  mutate(Pobre = ifelse(prob > 0.5, 1, 0))
+
+# Métricas
+conf_matrix <- confusionMatrix(
+  factor(df_pred_train$Pobre),
+  factor(df_pred_train$Pobre_real)
+)
+print(conf_matrix)
+
+tp <- sum(df_pred_train$Pobre == 1 & df_pred_train$Pobre_real == 1)
+fp <- sum(df_pred_train$Pobre == 1 & df_pred_train$Pobre_real == 0)
+fn <- sum(df_pred_train$Pobre == 0 & df_pred_train$Pobre_real == 1)
+
+precision <- tp / (tp + fp)
+recall <- tp / (tp + fn)
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+cat("F1 Score (en train):", round(f1_score, 4), "\n")
+```
+```{r}
+write.csv(df_pred, file.path(predictions_path, "boosting_depth6_rounds500.csv"), row.names = FALSE)
+```
+
