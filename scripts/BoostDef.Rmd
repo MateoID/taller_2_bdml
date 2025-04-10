@@ -233,4 +233,202 @@ f1_score <- 2 * (precision * recall) / (precision + recall)
 
 cat("F1 Score (en train completo):", round(f1_score, 4), "\n")
 ```
+```{r}
+bd_train <- fread('../data/bd_train_limpia.csv')
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+train <- bd_train[, ..variables_modelo]
+train$Pobre <- factor(train$Pobre, levels = c("0", "1"), labels = c("No", "Si"))
+
+# Opcional: usar solo una muestra para pruebas rápidas
+# train <- train[sample(.N, 5000)]
+
+# Convertir solo columnas character a factor
+for (col in names(train)) {
+  if (is.character(train[[col]])) {
+    train[[col]] <- as.factor(train[[col]])
+  }
+}
+
+# Convertir a matriz numérica con model.matrix (más rápido que dummyVars)
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+train_labels <- train$Pobre
+
+# ---- MÉTRICA F1 ----
+f1_summary <- function(data, lev = NULL, model = NULL) {
+  F1_Score(y_pred = data$pred, y_true = data$obs, positive = "Si") %>%
+    setNames("F1")
+}
+
+# ---- GRID REDUCIDO ----
+xgb_grid <- expand.grid(
+  nrounds = c(100, 200),
+  max_depth = c(4, 6, 8),
+  eta = c(0.01, 0.1, 0.3),
+  gamma = c(0, 1),
+  colsample_bytree = c(0.6, 0.8, 1.0),
+  min_child_weight = c(1, 5),
+  subsample = c(0.7, 1.0)
+)
+
+# ---- CONTROL DE ENTRENAMIENTO ----
+set.seed(123)
+xgb_control <- trainControl(
+  method = "cv",
+  number = 2,   # ⚠️ Usa 2 para velocidad, aumenta a 5 o más luego
+  verboseIter = TRUE,
+  classProbs = TRUE,
+  summaryFunction = f1_summary,
+  allowParallel = FALSE  # ⚠️ Evita conflictos con xgboost interno
+)
+
+# ---- ENTRENAMIENTO ----
+model_xgb <- train(
+  x = train_matrix,
+  y = train_labels,
+  method = "xgbTree",
+  metric = "F1",
+  maximize = TRUE,
+  trControl = xgb_control,
+  tuneGrid = xgb_grid
+)
+
+# ---- RESULTADOS ----
+print(model_xgb)
+plot(model_xgb)
+cat("Mejores hiperparámetros encontrados:\n")
+print(model_xgb$bestTune)
+```
+
+```{r}
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+# --- PREPROCESAMIENTO ---
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+for (col in names(train)) {
+  if (is.character(train[[col]])) train[[col]] <- as.factor(train[[col]])
+}
+for (col in names(test)) {
+  if (is.character(test[[col]])) test[[col]] <- as.factor(test[[col]])
+}
+
+# Matrices
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+
+# Alinear columnas
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) {
+  test_matrix_raw <- cbind(test_matrix_raw, setNames(data.frame(0), col))
+}
+test_matrix <- test_matrix_raw[, colnames(train_matrix), drop = FALSE]
+
+# Convertir a matrices
+train_matrix <- as.matrix(train_matrix)
+test_matrix <- as.matrix(test_matrix)
+
+# Etiquetas
+train_labels <- train$Pobre
+
+# DMatrix
+dtrain <- xgb.DMatrix(data = train_matrix, label = train_labels)
+dtest <- xgb.DMatrix(data = test_matrix)
+
+# --- HIPERPARÁMETROS GANADORES ---
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = 0.1,
+  max_depth = 8,
+  gamma = 1,
+  colsample_bytree = 1,
+  min_child_weight = 5,
+  subsample = 0.7
+)
+
+# --- ENTRENAR MODELO ---
+set.seed(123)
+final_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 200,
+  verbose = 1
+)
+
+# --- EVALUACIÓN EN TRAIN ---
+pred_train_probs <- predict(final_model, dtrain)
+
+# Buscar mejor umbral para F1
+thresholds <- seq(0.1, 0.9, by = 0.05)
+f1_scores <- sapply(thresholds, function(th) {
+  preds <- ifelse(pred_train_probs > th, 1, 0)
+  tp <- sum(preds == 1 & train_labels == 1)
+  fp <- sum(preds == 1 & train_labels == 0)
+  fn <- sum(preds == 0 & train_labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+})
+
+best_threshold <- thresholds[which.max(f1_scores)]
+cat(sprintf("\nUmbral óptimo: %.2f (F1 = %.4f)", best_threshold, max(f1_scores)))
+
+# Etiquetas predichas con mejor umbral
+pred_train_labels <- ifelse(pred_train_probs > best_threshold, 1, 0)
+
+# Matriz de confusión
+conf_matrix <- confusionMatrix(
+  factor(pred_train_labels, levels = c(0, 1)),
+  factor(train_labels, levels = c(0, 1)),
+  positive = "1"
+)
+print(conf_matrix)
+
+# Métricas manuales
+tp <- sum(pred_train_labels == 1 & train_labels == 1)
+fp <- sum(pred_train_labels == 1 & train_labels == 0)
+fn <- sum(pred_train_labels == 0 & train_labels == 1)
+
+precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+f1 <- ifelse(precision + recall == 0, 0, 2 * (precision * recall) / (precision + recall))
+
+cat(sprintf("\nPrecision: %.4f", precision))
+cat(sprintf("\nRecall: %.4f", recall))
+cat(sprintf("\nF1 Score (train): %.4f\n", f1))
+
+# --- PREDICCIÓN SOBRE TEST ---
+pred_probs <- predict(final_model, dtest)
+pred_labels <- ifelse(pred_probs > best_threshold, 1, 0)
+
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_labels
+fwrite(df_pred, "../results/predictions/xgboost_final.csv")
+```
 
