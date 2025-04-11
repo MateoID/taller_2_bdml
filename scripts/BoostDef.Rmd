@@ -157,16 +157,29 @@ for (i in seq_along(folds)) {
   dtrain <- xgb.DMatrix(data = as.matrix(train_fold), label = train_label_fold)
   dval <- xgb.DMatrix(data = as.matrix(val_fold), label = val_label_fold)
   
-  model_cv <- xgboost(
-    data = dtrain,
-    max.depth = 6,
-    nrounds = 100,
-    objective = "binary:logistic",
-    nthread = parallel::detectCores(),
-    verbose = 0
-  )
+  params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = 0.1,
+  max_depth = 8,
+  gamma = 1,
+  colsample_bytree = 1,
+  min_child_weight = 5,
+  subsample = 0.7
+)
+
+# --- ENTRENAR MODELO ---
+set.seed(123)
+final_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 200,
+  verbose = 1
+)
   
-  pred_probs <- predict(model_cv, newdata = dval)
+  
+  pred_probs <- predict(final_model, newdata = dval)
   preds <- ifelse(pred_probs > 0.5, 1, 0)
   
   tp <- sum(preds == 1 & val_label_fold == 1)
@@ -186,20 +199,32 @@ cat("F1 Score promedio (cross-validation):", round(mean(f1_scores), 4), "\n")
 # ENTRENAR MODELO FINAL con TODO el training
 dtrain_full <- xgb.DMatrix(data = as.matrix(train_numeric), label = train_labels)
 
-boost_model <- xgboost(
-  data = dtrain_full,
-  max.depth = 6,
-  nrounds = 100,
+  params <- list(
+  booster = "gbtree",
   objective = "binary:logistic",
-  nthread = parallel::detectCores(),
-  verbose = 0
+  eval_metric = "logloss",
+  eta = 0.1,
+  max_depth = 8,
+  gamma = 1,
+  colsample_bytree = 1,
+  min_child_weight = 5,
+  subsample = 0.7
+)
+
+# --- ENTRENAR MODELO ---
+set.seed(123)
+final_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 200,
+  verbose = 1
 )
 
 # Predicción sobre test
 test_numeric <- test[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = setdiff(variables_modelo, "Pobre")]
 test_matrix <- xgb.DMatrix(data = as.matrix(test_numeric))
 
-boost_pred <- predict(boost_model, newdata = test_matrix)
+boost_pred <- predict(final_model, newdata = test_matrix)
 
 df_pred <- test[, .(id)] %>%
   mutate(prob = boost_pred) %>%
@@ -207,10 +232,10 @@ df_pred <- test[, .(id)] %>%
   select(id, Pobre)
 
 # Guardar predicciones
-write.csv(df_pred, file.path(predictions_path, "boosting_depth6_rounds500_full.csv"), row.names = FALSE)
+#write.csv(df_pred, file.path(predictions_path, "boosting_depth6_rounds500_full.csv"), row.names = FALSE)
 
 # Evaluación en el set de entrenamiento
-train_pred <- predict(boost_model, newdata = dtrain_full)
+train_pred <- predict(final_model, newdata = dtrain_full)
 
 df_pred_train <- train[, .(id, Pobre_real = as.integer(as.character(Pobre)))] %>%
   mutate(prob = train_pred) %>%
@@ -311,6 +336,11 @@ print(model_xgb$bestTune)
 ```
 
 ```{r}
+library(data.table)
+library(xgboost)
+library(caret)
+
+# --- CARGAR DATOS ---
 bd_train <- fread("../data/bd_train_limpia.csv")
 bd_test <- fread("../data/bd_test_limpia.csv")
 
@@ -355,11 +385,17 @@ test_matrix <- as.matrix(test_matrix)
 # Etiquetas
 train_labels <- train$Pobre
 
+# Calcular scale_pos_weight
+neg <- sum(train_labels == 0)
+pos <- sum(train_labels == 1)
+scale_pos_weight <- neg / pos
+cat(sprintf("Balance de clases: %.2f (neg: %d / pos: %d)\n", scale_pos_weight, neg, pos))
+
 # DMatrix
 dtrain <- xgb.DMatrix(data = train_matrix, label = train_labels)
 dtest <- xgb.DMatrix(data = test_matrix)
 
-# --- HIPERPARÁMETROS GANADORES ---
+# --- HIPERPARÁMETROS GANADORES CON scale_pos_weight ---
 params <- list(
   booster = "gbtree",
   objective = "binary:logistic",
@@ -369,7 +405,8 @@ params <- list(
   gamma = 1,
   colsample_bytree = 1,
   min_child_weight = 5,
-  subsample = 0.7
+  subsample = 0.7,
+  scale_pos_weight = scale_pos_weight
 )
 
 # --- ENTRENAR MODELO ---
@@ -430,5 +467,750 @@ pred_labels <- ifelse(pred_probs > best_threshold, 1, 0)
 df_pred <- bd_test[, .(id)]
 df_pred$Pobre <- pred_labels
 fwrite(df_pred, "../results/predictions/xgboost_final.csv")
+
+```
+```{r}
+library(data.table)
+library(xgboost)
+library(caret)
+library(Matrix)
+
+# --- CARGAR DATOS ---
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+for (col in names(train)) {
+  if (is.character(train[[col]])) train[[col]] <- as.factor(train[[col]])
+}
+for (col in names(test)) {
+  if (is.character(test[[col]])) test[[col]] <- as.factor(test[[col]])
+}
+
+# --- Matrices de diseño ---
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+
+# Alinear columnas
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) {
+  test_matrix_raw <- cbind(test_matrix_raw, setNames(data.frame(0), col))
+}
+test_matrix <- test_matrix_raw[, colnames(train_matrix), drop = FALSE]
+
+# Convertir a matrices y etiquetas
+train_labels <- train$Pobre
+dtrain <- xgb.DMatrix(data = as.matrix(train_matrix), label = train_labels)
+dtest <- xgb.DMatrix(data = as.matrix(test_matrix))
+
+# --- Calcular scale_pos_weight ---
+neg <- sum(train_labels == 0)
+pos <- sum(train_labels == 1)
+scale_pos_weight <- neg / pos
+cat(sprintf("Balance de clases: %.2f (neg: %d / pos: %d)\n", scale_pos_weight, neg, pos))
+
+# --- Función de evaluación F1 personalizada ---
+f1_eval <- function(preds, dtrain) {
+  labels <- getinfo(dtrain, "label")
+  preds_binary <- ifelse(preds > 0.5, 1, 0)
+  tp <- sum(preds_binary == 1 & labels == 1)
+  fp <- sum(preds_binary == 1 & labels == 0)
+  fn <- sum(preds_binary == 0 & labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  f1 <- ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+  return(list(metric = "f1", value = f1))
+}
+
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eta = 0.1,
+  max_depth = 8,
+  gamma = 1,
+  colsample_bytree = 1,
+  min_child_weight = 5,
+  subsample = 0.7,
+  scale_pos_weight = scale_pos_weight
+)
+
+# --- VALIDACIÓN CRUZADA ---
+set.seed(123)
+cv_model <- xgb.cv(
+  params = params,
+  data = dtrain,
+  nrounds = 300,
+  nfold = 5,
+  showsd = TRUE,
+  stratified = TRUE,
+  early_stopping_rounds = 20,
+  maximize = TRUE,
+  feval = f1_eval,
+  verbose = 1
+)
+
+# Mejor número de rondas
+best_nrounds <- cv_model$best_iteration
+cat(sprintf("\nMejor número de rondas: %d\n", best_nrounds))
+
+# --- ENTRENAMIENTO FINAL ---
+final_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = best_nrounds,
+  verbose = 1
+)
+
+# --- EVALUACIÓN EN TRAIN PARA ELEGIR UMBRAL ---
+pred_train_probs <- predict(final_model, dtrain)
+
+thresholds <- seq(0.1, 0.9, by = 0.05)
+f1_scores <- sapply(thresholds, function(th) {
+  preds <- ifelse(pred_train_probs > th, 1, 0)
+  tp <- sum(preds == 1 & train_labels == 1)
+  fp <- sum(preds == 1 & train_labels == 0)
+  fn <- sum(preds == 0 & train_labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+})
+best_threshold <- thresholds[which.max(f1_scores)]
+cat(sprintf("\nUmbral óptimo (train): %.2f - F1: %.4f\n", best_threshold, max(f1_scores)))
+
+# --- PREDICCIÓN SOBRE TEST ---
+pred_probs <- predict(final_model, dtest)
+pred_labels <- ifelse(pred_probs > best_threshold, 1, 0)
+
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_labels
+
+fwrite(df_pred, "../results/predictions/xgboost_final_balanceado.csv")
+
+```
+```{r}
+library(data.table)
+library(xgboost)
+library(caret)
+
+# Cargar datos
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+# Preprocesamiento
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+for (col in names(train)) if (is.character(train[[col]])) train[[col]] <- as.factor(train[[col]])
+for (col in names(test)) if (is.character(test[[col]])) test[[col]] <- as.factor(test[[col]])
+
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) test_matrix_raw <- cbind(test_matrix_raw, setNames(data.frame(0), col))
+test_matrix <- test_matrix_raw[, colnames(train_matrix), drop = FALSE]
+
+train_matrix <- as.matrix(train_matrix)
+test_matrix <- as.matrix(test_matrix)
+train_labels <- train$Pobre
+
+# Cross-validation setup
+set.seed(42)
+folds <- createFolds(train_labels, k = 5, list = TRUE)
+f1_scores <- c()
+best_thresholds <- c()
+
+# Calcular scale_pos_weight
+neg <- sum(train_labels == 0)
+pos <- sum(train_labels == 1)
+scale_pos_weight <- neg / pos
+
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eta = 0.1,
+  max_depth = 8,
+  gamma = 1,
+  colsample_bytree = 1,
+  min_child_weight = 5,
+  subsample = 0.7,
+  scale_pos_weight = scale_pos_weight
+)
+
+for (i in seq_along(folds)) {
+  val_idx <- folds[[i]]
+  train_idx <- setdiff(seq_len(nrow(train_matrix)), val_idx)
+
+  dtrain <- xgb.DMatrix(data = train_matrix[train_idx, ], label = train_labels[train_idx])
+  dval <- xgb.DMatrix(data = train_matrix[val_idx, ], label = train_labels[val_idx])
+
+  model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 177,
+    verbose = 0
+  )
+
+  probs <- predict(model, dval)
+  thresholds <- seq(0.1, 0.9, by = 0.05)
+
+  f1s <- sapply(thresholds, function(th) {
+    preds <- ifelse(probs > th, 1, 0)
+    tp <- sum(preds == 1 & train_labels[val_idx] == 1)
+    fp <- sum(preds == 1 & train_labels[val_idx] == 0)
+    fn <- sum(preds == 0 & train_labels[val_idx] == 1)
+    precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+    recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+    ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+  })
+
+  best_f1 <- max(f1s)
+  best_th <- thresholds[which.max(f1s)]
+
+  f1_scores <- c(f1_scores, best_f1)
+  best_thresholds <- c(best_thresholds, best_th)
+}
+
+mean_f1 <- mean(f1_scores)
+mean_th <- mean(best_thresholds)
+
+cat(sprintf("\nPromedio F1 CV: %.4f", mean_f1))
+cat(sprintf("\nPromedio umbral óptimo: %.2f\n", mean_th))
+
+# ENTRENAR MODELO FINAL Y PREDECIR TEST
+dtrain_full <- xgb.DMatrix(data = train_matrix, label = train_labels)
+final_model <- xgb.train(
+  params = params,
+  data = dtrain_full,
+  nrounds = 177,
+  verbose = 1
+)
+
+dtest <- xgb.DMatrix(data = test_matrix)
+pred_probs <- predict(final_model, dtest)
+pred_labels <- ifelse(pred_probs > mean_th, 1, 0)
+
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_labels
+fwrite(df_pred, "../results/predictions/xgboost_final_cv_custom.csv")
+
+```
+```{r}
+library(data.table)
+library(xgboost)
+library(caret)
+library(Matrix)
+
+# --- CARGAR DATOS ---
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+# --- Preprocesamiento ---
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+for (col in names(train)) if (is.character(train[[col]])) train[[col]] <- as.factor(train[[col]])
+for (col in names(test)) if (is.character(test[[col]])) test[[col]] <- as.factor(test[[col]])
+
+# --- Matrices
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+
+# Alinear columnas
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) test_matrix_raw <- cbind(test_matrix_raw, setNames(data.frame(0), col))
+test_matrix <- test_matrix_raw[, colnames(train_matrix), drop = FALSE]
+
+# Convertir a DMatrix
+train_labels <- train$Pobre
+dtrain <- xgb.DMatrix(data = as.matrix(train_matrix), label = train_labels)
+dtest <- xgb.DMatrix(data = as.matrix(test_matrix))
+
+# --- scale_pos_weight
+neg <- sum(train_labels == 0)
+pos <- sum(train_labels == 1)
+scale_pos_weight <- neg / pos
+cat(sprintf("scale_pos_weight: %.2f\n", scale_pos_weight))
+
+# --- Hiperparámetros
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eta = 0.1,
+  max_depth = 8,
+  gamma = 1,
+  colsample_bytree = 1,
+  min_child_weight = 5,
+  subsample = 0.7,
+  scale_pos_weight = scale_pos_weight,
+  eval_metric = "logloss"
+)
+
+# --- Cross-validation
+set.seed(123)
+cv <- xgb.cv(
+  params = params,
+  data = dtrain,
+  nrounds = 300,
+  nfold = 5,
+  stratified = TRUE,
+  early_stopping_rounds = 20,
+  verbose = 1
+)
+
+best_nrounds <- cv$best_iteration
+cat(sprintf("Mejor número de rondas: %d\n", best_nrounds))
+
+# --- Entrenamiento final
+final_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = best_nrounds,
+  verbose = 1
+)
+
+# --- Buscar mejor umbral (F1 en train)
+pred_train_probs <- predict(final_model, dtrain)
+thresholds <- seq(0.1, 0.9, by = 0.01)
+
+f1_scores <- sapply(thresholds, function(th) {
+  preds <- ifelse(pred_train_probs > th, 1, 0)
+  tp <- sum(preds == 1 & train_labels == 1)
+  fp <- sum(preds == 1 & train_labels == 0)
+  fn <- sum(preds == 0 & train_labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+})
+
+best_threshold <- thresholds[which.max(f1_scores)]
+best_f1 <- max(f1_scores)
+cat(sprintf("Umbral óptimo: %.2f | F1: %.4f\n", best_threshold, best_f1))
+
+# --- PREDICCIÓN SOBRE TEST ---
+pred_probs <- predict(final_model, dtest)
+pred_labels <- ifelse(pred_probs > best_threshold, 1, 0)
+
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_labels
+fwrite(df_pred, "../results/predictions/xgboost_final_f1opt.csv")
+
+```
+```{r}
+library(data.table)
+library(xgboost)
+library(caret)
+library(Matrix)
+library(purrr)
+
+# --- SETUP ---
+set.seed(123)
+k <- 5
+folds <- createFolds(train$Pobre, k = k, list = TRUE, returnTrain = FALSE)
+
+# --- Función para F1 dado umbral ---
+f1_score <- function(preds, labels) {
+  tp <- sum(preds == 1 & labels == 1)
+  fp <- sum(preds == 1 & labels == 0)
+  fn <- sum(preds == 0 & labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+}
+
+# --- Resultados por fold ---
+fold_results <- list()
+
+# --- CROSS-VALIDATION ---
+for (i in seq_along(folds)) {
+  cat(sprintf("Fold %d/%d\n", i, k))
+  
+  # Separar datos
+  idx_val <- folds[[i]]
+  dtrain_fold <- train[-idx_val, ]
+  dval_fold   <- train[idx_val, ]
+  
+  # Matrices
+  X_train <- model.matrix(Pobre ~ . - 1, data = dtrain_fold)
+  y_train <- dtrain_fold$Pobre
+  X_val   <- model.matrix(Pobre ~ . - 1, data = dval_fold)
+  y_val   <- dval_fold$Pobre
+  
+  dtrain_matrix <- xgb.DMatrix(data = X_train, label = y_train)
+  dval_matrix   <- xgb.DMatrix(data = X_val)
+  
+  # scale_pos_weight
+  neg <- sum(y_train == 0)
+  pos <- sum(y_train == 1)
+  spw <- neg / pos
+  
+  # Parámetros sin eval_metric
+  params_fold <- list(
+    booster = "gbtree",
+    objective = "binary:logistic",
+    eta = 0.1,
+    max_depth = 8,
+    gamma = 1,
+    colsample_bytree = 1,
+    min_child_weight = 5,
+    subsample = 0.7,
+    scale_pos_weight = spw
+  )
+  
+  # Entrenar modelo
+  model <- xgb.train(
+    params = params_fold,
+    data = dtrain_matrix,
+    nrounds = 300,
+    verbose = 0,
+    early_stopping_rounds = 20,
+    watchlist = list(train = dtrain_matrix),
+    eval_metric = "logloss"
+  )
+  
+  # Predecir
+  pred_probs <- predict(model, dval_matrix)
+  
+  # Buscar umbral óptimo
+  thresholds <- seq(0.1, 0.9, by = 0.01)
+  f1s <- sapply(thresholds, function(th) {
+    preds <- ifelse(pred_probs > th, 1, 0)
+    f1_score(preds, y_val)
+  })
+  
+  best_th <- thresholds[which.max(f1s)]
+  best_f1 <- max(f1s)
+  
+  # Guardar resultados
+  fold_results[[i]] <- list(
+    fold = i,
+    best_threshold = best_th,
+    best_f1 = best_f1
+  )
+}
+
+# --- Reporte final ---
+resumen <- rbindlist(fold_results)
+cat(sprintf("F1 promedio: %.4f\n", mean(resumen$best_f1)))
+cat(sprintf("Umbral promedio: %.2f\n", mean(resumen$best_threshold)))
+
+
+```
+
+
+```{r}
+library(data.table)
+library(xgboost)
+library(Matrix)
+library(ParBayesianOptimization)
+
+# --- Cargar datos ---
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico", "tiene_patron", "tiene_cuenta_propia",
+                      "tiene_emp_domestico", "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima", "prima_serv", "prima_nav",
+                      "prima_vac", "ind_viaticos", "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz", "cotiz_pen", "ing_otros",
+                      "edad_prom", "perc_fem")
+
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+for (col in names(train)) if (is.character(train[[col]])) train[[col]] <- as.factor(train[[col]])
+for (col in names(test)) if (is.character(test[[col]])) test[[col]] <- as.factor(test[[col]])
+
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+
+# Alinear columnas
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) {
+  test_matrix_raw <- cbind(test_matrix_raw, setNames(data.frame(0), col))
+}
+test_matrix <- test_matrix_raw[, colnames(train_matrix), drop = FALSE]
+
+# Convertir a DMatrix
+train_labels <- train$Pobre
+dtrain <- xgb.DMatrix(data = as.matrix(train_matrix), label = train_labels)
+dtest <- xgb.DMatrix(data = as.matrix(test_matrix))
+
+# Calcular scale_pos_weight
+neg <- sum(train_labels == 0)
+pos <- sum(train_labels == 1)
+scale_pos_weight <- neg / pos
+
+# F1 personalizado
+f1_eval <- function(preds, dtrain) {
+  labels <- getinfo(dtrain, "label")
+  preds_binary <- ifelse(preds > 0.5, 1, 0)
+  tp <- sum(preds_binary == 1 & labels == 1)
+  fp <- sum(preds_binary == 1 & labels == 0)
+  fn <- sum(preds_binary == 0 & labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  f1 <- ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+  return(list(metric = "f1", value = f1))
+}
+
+# 🔧 Mejores parámetros encontrados (reemplaza estos con los de tu optimización)
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eta = 0.07,
+  max_depth = 7,
+  min_child_weight = 3,
+  subsample = 0.85,
+  colsample_bytree = 0.8,
+  gamma = 0.5,
+  scale_pos_weight = scale_pos_weight
+)
+
+# Entrenar con validación cruzada
+set.seed(123)
+cv <- xgb.cv(
+  params = params,
+  data = dtrain,
+  nrounds = 300,
+  nfold = 5,
+  stratified = TRUE,
+  early_stopping_rounds = 20,
+  feval = f1_eval,
+  maximize = TRUE,
+  verbose = 1
+)
+
+best_nrounds <- cv$best_iteration
+cat(sprintf("\nMejor número de rondas: %d\n", best_nrounds))
+
+# Entrenamiento final
+final_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = best_nrounds,
+  verbose = 1
+)
+
+# Evaluar F1 en train y buscar umbral óptimo
+pred_train_probs <- predict(final_model, dtrain)
+
+thresholds <- seq(0.1, 0.9, by = 0.01)
+f1_scores <- sapply(thresholds, function(th) {
+  preds <- ifelse(pred_train_probs > th, 1, 0)
+  tp <- sum(preds == 1 & train_labels == 1)
+  fp <- sum(preds == 1 & train_labels == 0)
+  fn <- sum(preds == 0 & train_labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+})
+best_threshold <- thresholds[which.max(f1_scores)]
+cat(sprintf("\nUmbral óptimo (train): %.2f | F1: %.4f\n", best_threshold, max(f1_scores)))
+
+# Predicción sobre test
+pred_probs <- predict(final_model, dtest)
+pred_labels <- ifelse(pred_probs > best_threshold, 1, 0)
+
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_labels
+
+# Guardar resultado final
+fwrite(df_pred, "../results/predictions/xgboost_bayesopt.csv")
+
+```
+
+```{r}
+library(data.table)
+library(xgboost)
+library(Matrix)
+library(ParBayesianOptimization)
+library(caret)
+
+# --- CARGAR DATOS ---
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+for (col in names(train)) if (is.character(train[[col]])) train[[col]] <- as.factor(train[[col]])
+for (col in names(test)) if (is.character(test[[col]])) test[[col]] <- as.factor(test[[col]])
+
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+
+# Alinear columnas
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) {
+  test_matrix_raw <- cbind(test_matrix_raw, setNames(data.frame(0), col))
+}
+test_matrix <- test_matrix_raw[, colnames(train_matrix), drop = FALSE]
+
+# Etiquetas y matrices DMatrix
+train_labels <- train$Pobre
+dtrain <- xgb.DMatrix(data = as.matrix(train_matrix), label = train_labels)
+dtest <- xgb.DMatrix(data = as.matrix(test_matrix))
+
+# Balanceo
+neg <- sum(train_labels == 0)
+pos <- sum(train_labels == 1)
+scale_pos_weight <- neg / pos
+
+# Evaluación personalizada F1
+f1_score <- function(preds, labels) {
+  preds_binary <- ifelse(preds > 0.5, 1, 0)
+  tp <- sum(preds_binary == 1 & labels == 1)
+  fp <- sum(preds_binary == 1 & labels == 0)
+  fn <- sum(preds_binary == 0 & labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  f1 <- ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+  return(f1)
+}
+
+# Objetivo para optimización bayesiana
+opt_f1 <- function(eta, max_depth, gamma, colsample_bytree, min_child_weight) {
+  params <- list(
+    booster = "gbtree",
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    eta = eta,
+    max_depth = as.integer(max_depth),
+    gamma = gamma,
+    colsample_bytree = colsample_bytree,
+    min_child_weight = min_child_weight,
+    subsample = 0.8,
+    scale_pos_weight = scale_pos_weight
+  )
+
+  cv <- xgb.cv(
+    params = params,
+    data = dtrain,
+    nfold = 5,
+    nrounds = 200,
+    early_stopping_rounds = 15,
+    verbose = 0,
+    prediction = TRUE
+  )
+
+  preds <- cv$pred
+  labels <- getinfo(dtrain, "label")
+  f1 <- f1_score(preds, labels)
+  return(list(Score = f1))
+}
+
+# Optimización bayesiana
+bounds <- list(
+  eta = c(0.01, 0.3),
+  max_depth = c(4L, 10L),
+  gamma = c(0, 5),
+  colsample_bytree = c(0.5, 1),
+  min_child_weight = c(1, 10)
+)
+
+set.seed(123)
+opt_res <- bayesOpt(
+  FUN = opt_f1,
+  bounds = bounds,
+  initPoints = 10,
+  iters.n = 15,
+  acq = "ei",
+  verbose = 1
+)
+
+# Mejor conjunto de hiperparámetros
+best_params <- getBestPars(opt_res)
+
+# Entrenamiento final con mejores hiperparámetros
+final_params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = best_params$eta,
+  max_depth = as.integer(best_params$max_depth),
+  gamma = best_params$gamma,
+  colsample_bytree = best_params$colsample_bytree,
+  min_child_weight = best_params$min_child_weight,
+  subsample = 0.8,
+  scale_pos_weight = scale_pos_weight
+)
+
+final_model <- xgb.train(
+  params = final_params,
+  data = dtrain,
+  nrounds = 200,
+  verbose = 1
+)
+
+# Búsqueda del mejor umbral sobre train
+pred_train_probs <- predict(final_model, dtrain)
+thresholds <- seq(0.1, 0.9, by = 0.05)
+f1_scores <- sapply(thresholds, function(th) f1_score(ifelse(pred_train_probs > th, 1, 0), train_labels))
+best_threshold <- thresholds[which.max(f1_scores)]
+cat(sprintf("\nUmbral óptimo (train): %.2f - F1: %.4f\n", best_threshold, max(f1_scores)))
+
+# Predicción sobre test
+pred_probs <- predict(final_model, dtest)
+pred_labels <- ifelse(pred_probs > best_threshold, 1, 0)
+
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_labels
+
+fwrite(df_pred, "../results/predictions/xgboost_final_bayesopt.csv")
+
 ```
 
