@@ -20,6 +20,7 @@ p_load(tidyverse, # tidy-data
        MLmetrics, # Evaluation Metrics for ML
        ipred,  # For Bagging 
        ranger #For random Forest
+       themis, # For oversampling
        )   
 ```
 
@@ -53,6 +54,8 @@ prop.table(table(bd_train$Pobre))
 
 creando una función personalizada que use el F1 score para elegir el
 mejor modelo.
+
+### Configuración del control
 
 ```{r function_metrics}
 
@@ -147,7 +150,26 @@ write.csv(submission,
 
 
 
-## Modelo con ciertas variables
+## Modelo con variables seleccionadas
+
+### Configuración del control
+
+```{r}
+# Control de entrenamiento
+ctrl_c2 <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = sixStats,
+  classProbs = TRUE,      # Necesario para ROC/F1
+  savePredictions = TRUE, # Para calcular métricas
+  verboseIter = FALSE
+)
+
+# especificamos la grilla de los alphas
+grid_2 <- expand.grid(cp = seq(0, 0.0115, by = 0.002))
+```
+
+### Entrenando el modelo
 
 ```{r}
 # Declarando la semilla para reproducibilidad
@@ -159,41 +181,70 @@ cv_tree_2 <- train(
       ind_prima + prima_serv + prima_nav + prima_vac + ind_viaticos + ocupado + cotiz_pen + edad_prom,
                data = bd_train,
                method = "rpart", 
-               trControl = ctrl, 
-               tuneGrid = grid, 
+               trControl = ctrl_c2, 
+               tuneGrid = grid_2, 
                metric= "F1" 
                )
 cv_tree_2
 
 ```
+### Exportando predicciones
 
-##Modelo usando oversampling - best
+Ahora preparamos el archivo de output para subir la predicción de
+pobreza a Kaggle usando la base de test.
 
 ```{r}
-ctrl_cart <- trainControl(
+# Obtener predicciones (clases: "No_Pobre" o "Pobre")
+predicciones_clase <- predict(cv_tree_2, newdata = bd_test)
+
+# Convertir a 0 y 1 (para el formato de Kaggle)
+predicciones_numericas <- ifelse(predicciones_clase == "No_pobre", 0, 1)
+
+#Crear CSV para Kaggle
+submission <- data.frame(
+  id = bd_test$id,
+  pobre = predicciones_numericas
+)
+
+# Create descriptive filename
+filename <- sprintf("%s/CART-cp0_5fold_F1op_somevar_%s.csv", 
+                   predictions_path,
+                   format(Sys.time(), "%Y%m%d_%H%M"))
+
+# 6. Save with proper format
+write.csv(submission, 
+          file = filename,
+          row.names = FALSE,
+          quote = FALSE)
+
+```
+
+
+## Modelo usando oversampling up
+
+### Configuración del control
+```{r}
+
+# Control de entrenamiento
+ctrl_c3 <- trainControl(
   method = "cv",
   number = 5,
-  sampling = "up",  # Upsampling de la clase "pobre" (oversampling)
   summaryFunction = sixStats,
-  classProbs = TRUE
+  classProbs = TRUE,      # Necesario para ROC/F1
+  savePredictions = TRUE, # Para calcular métricas
+  verboseIter = FALSE, 
+  sampling = "up",  # Upsampling de la clase "pobre" (oversampling)
 )
-```
 
-
-```{r}
-grid_cart <- data.frame(cp = seq(0, 0.1, by = 0.02))  # Solo cp
-
-# grid <- expand.grid(
-#   cp = seq(0.0005, 0.01, by = 0.0005),  # Valores más bajos para cp
-#   minsplit = c(10, 20, 30),              # Evita splits con muy pocos datos
-#   minbucket = c(5, 10, 15)               # Controla el tamaño mínimo en hojas
-# )
+# especificamos la grilla de los alphas
+grid_cart_c3 <- expand.grid(cp = seq(0, 0.0001, by = 0.00001))
 
 ```
 
+### Entrenando el modelo
 ```{r}
-cv_tree <- train(
-      Pobre ~ Clase + Dominio + num_room + 
+cv_tree_c3 <- train(
+      Pobre ~ Cabecera + Dominio + num_room + 
                       num_bed + propiedad + pago_amort + renta_h + 
                       renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
                       tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
@@ -204,200 +255,162 @@ cv_tree <- train(
                       perc_fem,  # Usa todas las variables (o ajusta la fórmula)
   data = bd_train,
   method = "rpart",
-  trControl = ctrl_cart,
-  tuneGrid = grid_cart,
+  trControl = ctrl_c3,
+  tuneGrid = grid_cart_c3,
   metric = "F1" 
 )
 
-cv_tree
+cv_tree_c3
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Xgboost
-
-Preparación de la base. Todas las variables deben ser numéricas
+### Exportando predicciones
 
 ```{r}
-#Selección de variables relevantes
-variables_modelo <- c("Pobre", "Clase", "Dominio", "num_room", "num_bed", "propiedad",
-                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
-                      "promedio_antiguedad", "tiene_empleado_publico",
-                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
-                      "tiene_jornalero", "tiene_sin_remuneracion", 
-                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
-                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
-                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
-                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
-                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+# Obtener predicciones (clases: "No_Pobre" o "Pobre")
+predicciones_clase <- predict(cv_tree_c3, newdata = bd_test)
 
-#Preparación de la base de entrenamiento
-setDT(bd_train)
-train <- bd_train[, .SD, .SDcols = c("id", variables_modelo)]
+# Convertir a 0 y 1 (para el formato de Kaggle)
+predicciones_numericas <- ifelse(predicciones_clase == "No_pobre", 0, 1)
 
-#Preparación del conjunto de prueba 
-variables_modelo_te <- setdiff(variables_modelo, "Pobre")
-setDT(bd_test)
-test <- bd_test[, .SD, .SDcols = c("id", variables_modelo_te)]
-
-# Retirando NAs
-train <- na.omit(train)
-
-# Convirtiendo train en matrices de variables todas numéricas. 
-train_numeric <- train[, lapply(.SD, function(x) as.numeric(as.character(x))), .SDcols = variables_modelo[-1]]
-train_matrix <- xgb.DMatrix(
-  data = as.matrix(train_numeric),
-  label = as.numeric(train$Pobre) - 1
+#Crear CSV para Kaggle
+submission <- data.frame(
+  id = bd_test$id,
+  pobre = predicciones_numericas
 )
 
+# Create descriptive filename
+filename <- sprintf("%s/CART-cp0_5fold_F1op_upsampl_%s.csv", 
+                   predictions_path,
+                   format(Sys.time(), "%Y%m%d_%H%M"))
 
+# 6. Save with proper format
+write.csv(submission, 
+          file = filename,
+          row.names = FALSE,
+          quote = FALSE)
 ```
 
 
-control
+## Modelo usando SMOTE
 
+### Configuración del control
 ```{r}
-# Configurar trainControl para F1
-ctrl_boost <- trainControl(
+
+# Control de entrenamiento
+ctrl_c4 <- trainControl(
   method = "cv",
   number = 5,
-  summaryFunction = prSummary,  # Necesario para F1
-  classProbs = TRUE,           # Para obtener probabilidades
-  allowParallel = TRUE,
-  verboseIter = TRUE, 
+  summaryFunction = sixStats,
+  classProbs = TRUE,      # Necesario para ROC/F1
+  savePredictions = TRUE, # Para calcular métricas
+  verboseIter = FALSE, 
+  sampling = "smote",  
 )
+
+# especificamos la grilla de los alphas
+grid_cart_c4 <- expand.grid(cp = seq(0, 0.0002, by = 0.00002))
 
 ```
 
-tunegrid:
-
+### Entrenando el modelo
 ```{r}
-grid_boost <- expand.grid(
-  nrounds = c(100, 150),           # Iteraciones
-  max_depth = c(4, 6),             # Profundidad del árbol
-  eta = c(0.01, 0.1),              # Tasa de aprendizaje
-  gamma = c(0, 0.1),               # Reducción mínima de pérdida
-  colsample_bytree = c(0.7, 0.9),  # Variables por árbol
-  min_child_weight = c(1, 3),      # Peso mínimo en nodos
-  subsample = c(0.7, 0.9)          # Muestreo de datos
-)
-```
-
-
-```{r}
-# Entrenar modelo XGBoost
-boost_model <- xgboost(
-  data = train_matrix,
-  max.depth = 6,
-  nrounds = 100,
-  objective = "binary:logistic",
-  verbose = 0, 
-  params = list(scale_pos_weight = ratio)
-)
-```
-
-
-```{r}
-xgb_model <- train(
-  x = train[, variables_modelo[-1], with = FALSE],
-  y = train$Pobre,
-  method = "xgbTree",
-  trControl = ctrl_boost,
-  tuneGrid = grid_boost,
-  metric = "F",            # F1-Score (se llama "F" en prSummary)
-  verbose = FALSE
-)
-
-# Resultados
-print(xgb_model)
-#plot(xgb_model)  # Gráfica de F1 vs. combinaciones de hiperparámetros
-```
-
-
-```{r}
-model <- train(
-        Pobre ~ Clase + Dominio + num_room + 
+cv_tree_c4 <- train(
+      Pobre ~ Cabecera + Dominio + num_room + 
                       num_bed + propiedad + pago_amort + renta_h + 
                       renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
                       tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
                       tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion+ 
                       n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav +
                       prima_vac + ind_viaticos + ocupado + ind_oficio + ind_arriendo + pet_trabajo +
-                      max_educ + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros +
-                      edad_prom + perc_fem,
+                      max_educ + edad_prom + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros +
+                      perc_fem,  # Usa todas las variables (o ajusta la fórmula)
   data = bd_train,
-  method = "xgbTree",
-  trControl = ctrl_cart,
-  tuneGrid = expand.grid(
-    nrounds = 100,
-    max_depth = c(3, 6),
-    eta = 0.1,
-    gamma = 0,
-    colsample_bytree = 0.8,
-    min_child_weight = 1,
-    subsample = 0.8
-  ),
-  metric = "Sens"
+  method = "rpart",
+  trControl = ctrl_c4,
+  tuneGrid = grid_cart_c4,
+  metric = "F1" 
 )
 
-model
+cv_tree_c4
 ```
 
-#RF
+
+### Exportando predicciones
 
 ```{r}
-library(ranger)
-model <- train(
-  Pobre ~ .,
-  data = datos,
-  method = "ranger",
-  trControl = ctrl,
-  tuneGrid = data.frame(
-    mtry = c(5, 10, 15),
-    splitrule = "gini",
-    min.node.size = c(1, 5, 10)
-  ),
-  metric = "Sens",
-  class.weights = c("pobre" = 5, "No_pobre" = 1)  # Penaliza más los errores en "pobre"
+# Obtener predicciones (clases: "No_Pobre" o "Pobre")
+predicciones_clase <- predict(cv_tree_c4, newdata = bd_test)
+
+# Convertir a 0 y 1 (para el formato de Kaggle)
+predicciones_numericas <- ifelse(predicciones_clase == "No_pobre", 0, 1)
+
+#Crear CSV para Kaggle
+submission <- data.frame(
+  id = bd_test$id,
+  pobre = predicciones_numericas
 )
+
+# Create descriptive filename
+filename <- sprintf("%s/CART-cp0_5fold_F1op_SMOTE_%s.csv", 
+                   predictions_path,
+                   format(Sys.time(), "%Y%m%d_%H%M"))
+
+# 6. Save with proper format
+write.csv(submission, 
+          file = filename,
+          row.names = FALSE,
+          quote = FALSE)
+```
+
+
+
+
+
+
+
+
+
+## Modelo usando oversampling up
+
+### Configuración del control
+```{r}
+
+# Control de entrenamiento
+ctrl_c3 <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = sixStats,
+  classProbs = TRUE,      # Necesario para ROC/F1
+  savePredictions = TRUE, # Para calcular métricas
+  verboseIter = FALSE, 
+  sampling = "up",  # Upsampling de la clase "pobre" (oversampling)
+)
+
+# especificamos la grilla de los alphas
+grid_cart_c3 <- expand.grid(cp = seq(0.0003, 0.0005, by = 0.000001))
+
+```
+
+### Entrenando el modelo
+```{r}
+cv_tree_c3 <- train(
+      Pobre ~ Cabecera + Dominio + num_room + 
+                      num_bed + propiedad + pago_amort + renta_h + 
+                      renta_r + Nper + Depto + suma_antiguedad + promedio_antiguedad + 
+                      tiene_empleado_publico + tiene_patron + tiene_cuenta_propia + 
+                      tiene_emp_domestico + tiene_jornalero + tiene_sin_remuneracion+ 
+                      n_posiciones_lab_distintas + aux_trans + ind_prima + prima_serv + prima_nav +
+                      prima_vac + ind_viaticos + ocupado + ind_oficio + ind_arriendo + pet_trabajo +
+                      max_educ + edad_prom + hr_extr + otro_tr + rem_ext + reg_cotiz + cotiz_pen + ing_otros +
+                      perc_fem,  # Usa todas las variables (o ajusta la fórmula)
+  data = bd_train,
+  method = "rpart",
+  trControl = ctrl_c3,
+  tuneGrid = grid_cart_c3,
+  metric = "F1" 
+)
+
+cv_tree_c3
 ```
 
 
