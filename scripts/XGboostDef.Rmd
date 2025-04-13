@@ -20,6 +20,10 @@ variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "pr
 
 bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
 
+# para data.table
+setDT(bd_train)  # Convierte bd_train a data.table
+setDT(bd_test)
+
 train <- bd_train[, ..variables_modelo]
 test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
 
