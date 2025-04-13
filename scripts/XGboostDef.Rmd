@@ -1058,6 +1058,16 @@ cat(sprintf("F1 Score OUT-OF-FOLD (real): %.4f\n", f1_oof))
 
 ```
 ```{r}
+library(data.table)
+library(xgboost)
+library(Matrix)
+library(caret)
+library(glmnet)
+library(smotefamily)
+library(pROC)
+```
+
+```{r}
 
 library(data.table)
 library(xgboost)
@@ -1346,5 +1356,51 @@ cat(sprintf("F1 Score en SMOTE-entrenamiento (Ensemble): %.4f\n", best_f1))
 cat(sprintf("Umbral óptimo utilizado: %.2f\n", best_threshold))
 cat(sprintf("F1 Score OUT-OF-FOLD (real): %.4f\n", f1_oof))
 cat(sprintf("Peso promedio del ensemble: %.2f\n", avg_weight))
+```
+
+
+```{r}
+# --- GUARDAR MODELOS Y METADATOS ---
+
+# Crear directorio para modelos si no existe
+dir.create("../models", showWarnings = FALSE)
+
+# 1. Guardar modelo XGBoost
+xgb.save(final_xgb, "../models/xgboost_model.model")
+
+# 2. Guardar modelo GLMNET
+saveRDS(final_glmnet, "../models/glmnet_model.rds")
+
+# 3. Guardar los parámetros del ensemble
+ensemble_metadata <- list(
+  ensemble_weight = avg_weight,
+  best_threshold = best_threshold,
+  feature_names = colnames(train_matrix),
+  smote_params = list(K = 3, dup_size = 4),
+  xgb_params = params,
+  glmnet_params = list(alpha = 0.2, type.measure = "auc")
+)
+
+saveRDS(ensemble_metadata, "../models/ensemble_metadata.rds")
+
+# 4. Guardar información de las variables (opcional, útil para análisis)
+variable_info <- list(
+  importance_matrix = importance_matrix,
+  oof_performance = f1_oof,
+  train_performance = best_f1
+)
+
+saveRDS(variable_info, "../models/variable_info.rds")
+
+# 5. Guardar todo junto en un único archivo (alternativa)
+save(
+  final_xgb,
+  final_glmnet,
+  ensemble_metadata,
+  variable_info,
+  file = "../models/full_ensemble_model.RData"
+)
+
+cat("Modelos guardados exitosamente en la carpeta ../models/\n")
 ```
 

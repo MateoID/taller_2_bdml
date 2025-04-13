@@ -1,0 +1,287 @@
+```{r}
+
+library(data.table)
+library(xgboost)
+library(Matrix)
+
+# --- CARGAR DATOS ---
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico",
+                      "tiene_patron", "tiene_cuenta_propia", "tiene_emp_domestico",       
+                      "tiene_jornalero", "tiene_sin_remuneracion", 
+                      "n_posiciones_lab_distintas", "aux_trans", "ind_prima",
+                      "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz",
+                      "cotiz_pen", "ing_otros", "edad_prom", "perc_fem")
+
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+# --- NUEVAS FEATURES DERIVADAS ---
+transformar <- function(df) {
+  df[, ing_total := renta_h + renta_r + ing_otros]
+  df[, ing_total_log := log1p(ing_total)]
+  df[, renta_per_capita := (renta_h + renta_r) / (Nper + 1)]
+  df[, ocupado_por_fem := ocupado * perc_fem]
+  df[, edad_prom_cuadrado := edad_prom^2]
+  df[, renta_per_fem := (renta_h + renta_r) * perc_fem]
+  df[, antiguedad_por_ocupado := suma_antiguedad * ocupado]
+  df[, educacion_x_edad := max_educ * edad_prom]
+  df
+}
+
+train <- transformar(train)
+test <- transformar(test)
+
+# --- CONVERTIR CARACTERES A FACTORES ---
+for (col in names(train)) if (is.character(train[[col]])) train[[col]] <- as.factor(train[[col]])
+for (col in names(test)) if (is.character(test[[col]])) test[[col]] <- as.factor(test[[col]])
+
+# --- MATRICES DE MODELADO ---
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+
+# Alinear columnas
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) test_matrix_raw <- cbind(test_matrix_raw, setNames(data.frame(0), col))
+test_matrix <- test_matrix_raw[, colnames(train_matrix), drop = FALSE]
+
+# Convertir a DMatrix
+train_labels <- train$Pobre
+dtrain <- xgb.DMatrix(data = as.matrix(train_matrix), label = train_labels)
+dtest <- xgb.DMatrix(data = as.matrix(test_matrix))
+
+# --- Ajuste dinámico de scale_pos_weight ---
+neg <- sum(train_labels == 0)
+pos <- sum(train_labels == 1)
+scale_pos_weight <- neg / pos
+cat(sprintf("scale_pos_weight: %.2f\n", scale_pos_weight))
+
+# --- PARÁMETROS XGBOOST ---
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "aucpr",  # mejor para F1
+  eta = 0.1,
+  max_depth = 10,
+  min_child_weight = 10,
+  colsample_bytree = 0.8,
+  subsample = 0.8,
+  gamma = 1,
+  scale_pos_weight = scale_pos_weight
+)
+
+# --- ENTRENAMIENTO CON EARLY STOPPING ---
+set.seed(123)
+final_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 300,
+  early_stopping_rounds = 30,
+  watchlist = list(train = dtrain),
+  verbose = 1
+)
+
+# --- OPTIMIZACIÓN DE UMBRAL ---
+f1_score <- function(preds, labels) {
+  tp <- sum(preds == 1 & labels == 1)
+  fp <- sum(preds == 1 & labels == 0)
+  fn <- sum(preds == 0 & labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+}
+
+pred_train_probs <- predict(final_model, dtrain)
+thresholds <- seq(0.1, 0.9, by = 0.01)
+f1s <- sapply(thresholds, function(th) {
+  preds <- ifelse(pred_train_probs > th, 1, 0)
+  f1_score(preds, train_labels)
+})
+
+best_threshold <- thresholds[which.max(f1s)]
+best_f1 <- max(f1s)
+
+cat(sprintf("Umbral óptimo: %.2f | F1 en train: %.4f\n", best_threshold, best_f1))
+
+# --- PREDICCIONES TEST ---
+pred_probs_test <- predict(final_model, dtest)
+pred_labels <- ifelse(pred_probs_test > best_threshold, 1, 0)
+
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_labels
+fwrite(df_pred, "../results/predictions/xgboost_final_f1opt_mejorado.csv")
+
+# --- GUARDAR F1 SCORE DEL MODELO ---
+f1_resultado_final <- data.table(
+  modelo = "XGBoost_final_mejorado",
+  f1_score = best_f1,
+  threshold = best_threshold
+)
+fwrite(f1_resultado_final, "../results/f1_final_model_mejorado.csv")
+
+
+```
+```{r}
+library(data.table)
+library(xgboost)
+library(Matrix)
+library(caret)
+
+# --- CARGAR DATOS ---
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico", "tiene_patron", 
+                      "tiene_cuenta_propia", "tiene_emp_domestico", "tiene_jornalero", 
+                      "tiene_sin_remuneracion", "n_posiciones_lab_distintas", "aux_trans", 
+                      "ind_prima", "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo", "max_educ", 
+                      "hr_extr", "otro_tr", "rem_ext", "reg_cotiz", "cotiz_pen", "ing_otros", 
+                      "edad_prom", "perc_fem")
+
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+# --- FEATURES DERIVADAS ---
+transformar <- function(df) {
+  df[, ing_total := renta_h + renta_r + ing_otros]
+  df[, ing_total_log := log1p(ing_total)]
+  df[, renta_per_capita := (renta_h + renta_r) / (Nper + 1)]
+  df[, ocupado_por_fem := ocupado * perc_fem]
+  df[, edad_prom_cuadrado := edad_prom^2]
+  df[, renta_per_fem := (renta_h + renta_r) * perc_fem]
+  df[, antiguedad_por_ocupado := suma_antiguedad * ocupado]
+  df[, educacion_x_edad := max_educ * edad_prom]
+  df
+}
+train <- transformar(train)
+test <- transformar(test)
+
+# --- CONVERTIR A FACTORES ---
+for (col in names(train)) if (is.character(train[[col]])) train[[col]] <- as.factor(train[[col]])
+for (col in names(test)) if (is.character(test[[col]])) test[[col]] <- as.factor(test[[col]])
+
+# --- MATRICES DE MODELADO ---
+train_labels <- train$Pobre
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) test_matrix_raw <- cbind(test_matrix_raw, setNames(data.frame(0), col))
+test_matrix <- test_matrix_raw[, colnames(train_matrix), drop = FALSE]
+
+# --- F1 SCORE ---
+f1_score <- function(preds, labels) {
+  tp <- sum(preds == 1 & labels == 1)
+  fp <- sum(preds == 1 & labels == 0)
+  fn <- sum(preds == 0 & labels == 1)
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+}
+
+# --- PARÁMETROS BASE ---
+neg <- sum(train_labels == 0)
+pos <- sum(train_labels == 1)
+scale_pos_weight <- neg / pos
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "aucpr",
+  eta = 0.1,
+  max_depth = 10,
+  min_child_weight = 10,
+  colsample_bytree = 0.8,
+  subsample = 0.8,
+  gamma = 1,
+  scale_pos_weight = scale_pos_weight
+)
+
+# --- VALIDACIÓN CRUZADA PERSONALIZADA ---
+set.seed(123)
+folds <- createFolds(train_labels, k = 5, list = TRUE, returnTrain = FALSE)
+
+f1_scores <- c()
+best_thresholds <- c()
+
+for (i in seq_along(folds)) {
+  cat(sprintf("\n--- Fold %d ---\n", i))
+  val_idx <- folds[[i]]
+  train_idx <- setdiff(seq_len(nrow(train_matrix)), val_idx)
+  
+  dtrain_fold <- xgb.DMatrix(data = train_matrix[train_idx, ], label = train_labels[train_idx])
+  dval_fold <- xgb.DMatrix(data = train_matrix[val_idx, ], label = train_labels[val_idx])
+  
+  model <- xgb.train(
+    params = params,
+    data = dtrain_fold,
+    nrounds = 300,
+    early_stopping_rounds = 30,
+    watchlist = list(val = dval_fold),
+    verbose = 0
+  )
+  
+  preds_probs <- predict(model, dval_fold)
+  thresholds <- seq(0.1, 0.9, 0.01)
+  f1s <- sapply(thresholds, function(th) {
+    preds <- ifelse(preds_probs > th, 1, 0)
+    f1_score(preds, train_labels[val_idx])
+  })
+  
+  best_th <- thresholds[which.max(f1s)]
+  best_f1 <- max(f1s)
+  
+  cat(sprintf("Threshold óptimo fold %d: %.2f | F1: %.4f\n", i, best_th, best_f1))
+  f1_scores <- c(f1_scores, best_f1)
+  best_thresholds <- c(best_thresholds, best_th)
+}
+
+# --- RESULTADOS VALIDACIÓN ---
+cat("\n==== F1 Score Promedio Validación ====\n")
+cat(sprintf("F1 promedio: %.4f | Threshold promedio: %.3f\n",
+            mean(f1_scores), mean(best_thresholds)))
+
+# --- ENTRENAMIENTO FINAL ---
+dtrain_final <- xgb.DMatrix(data = train_matrix, label = train_labels)
+final_model <- xgb.train(
+  params = params,
+  data = dtrain_final,
+  nrounds = 300,
+  early_stopping_rounds = 30,
+  watchlist = list(train = dtrain_final),
+  verbose = 1
+)
+
+# --- PREDICCIONES TEST ---
+dtest <- xgb.DMatrix(data = test_matrix)
+pred_test_probs <- predict(final_model, dtest)
+final_threshold <- mean(best_thresholds)
+pred_test_labels <- ifelse(pred_test_probs > final_threshold, 1, 0)
+
+# --- GUARDAR PREDICCIONES ---
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_test_labels
+fwrite(df_pred, "../results/predictions/xgboost_cv_f1opt.csv")
+
+# --- GUARDAR F1 PROMEDIO ---
+f1_resultado <- data.table(
+  modelo = "xgboost_cv_f1opt",
+  f1_score_cv = mean(f1_scores),
+  threshold_avg = final_threshold
+)
+fwrite(f1_resultado, "../results/f1_cv_model.csv")
+
+
+```
+
