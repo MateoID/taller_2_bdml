@@ -1,4 +1,4 @@
-# Integrantes del grupo 
+# INTEGRANTES
 María Camila Caraballo - 201613424 - mc.caraballo@uniandes.edu.co
 Javier Amaya Nieto - 202214392 - j.amayan@uniandes.edu.co
 Mateo Isaza Díaz - 202412526 - m.isazad@uniandes.edu.co
