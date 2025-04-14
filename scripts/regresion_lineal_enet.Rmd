@@ -630,5 +630,12 @@ df_pred <- bd_validation %>%
   select(id, Pobre_pred, Pobre)
 ```
 ```{r}
+df_pred <- df_pred %>% 
+  mutate(Pobre = as.factor(Pobre),
+         Pobre_pred = as.factor(Pobre_pred))
+
+confusionMatrix(df_pred$Pobre, df_pred$Pobre_pred)
+```
+```{r}
 F1_Score(y_true = df_pred$Pobre, y_pred = df_pred$Pobre_pred, positive = "1")
 ```
