@@ -19,8 +19,8 @@ p_load(tidyverse, # tidy-data
        Metrics, ## Evaluation Metrics for ML
        MLmetrics, # Evaluation Metrics for ML
        ipred,  # For Bagging 
-       ranger #For random Forest
-       themis, # For oversampling
+       ranger, #For random Forest
+       themis # For oversampling
        )   
 ```
 
@@ -361,13 +361,6 @@ write.csv(submission,
           row.names = FALSE,
           quote = FALSE)
 ```
-
-
-
-
-
-
-
 
 
 ## Modelo usando oversampling up
