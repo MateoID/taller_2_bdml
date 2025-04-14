@@ -43,7 +43,6 @@ taller_2_bdml/
 │   ├── train_hogares.csv
 │   ├── train_personas.csv
 ├───results
-│   ├───figures
 │   ├───predictions
 │   └───tables
 ├── document
