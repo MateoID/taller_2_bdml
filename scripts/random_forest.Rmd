@@ -54,7 +54,7 @@ bd_test <- read.csv(file.path(raw_data_path, 'bd_test_limpia.csv'))
 # Fórmula del modelo:
 # Variable dependiente: Pobre
 # Variables independientes: 34 predictores demográficos, económicos y laborales
-model_tree1 <- Pobre ~ Cabecera + Dominio + num_room + num_bed + propiedad + 
+model_tree1 <- Pobre ~ Clase + Dominio + num_room + num_bed + propiedad + 
   pago_amort + renta_h + renta_r + Nper + Depto + suma_antiguedad + 
   promedio_antiguedad + tiene_empleado_publico + tiene_patron + 
   tiene_cuenta_propia + tiene_emp_domestico + tiene_jornalero + 
@@ -142,10 +142,10 @@ predictions <- predict(tree_model1, bd_validation)
 # - Pobre_hat: Predicción del modelo
 df_pred <- bd_validation %>%
   select(id, Pobre) %>%
-  mutate(Pobre_hat = predictions)
+  mutate(Pobre = as.factor(Pobre),
+         Pobre_hat = as.factor(predictions))
 
 # Cálculo de métrica F1-Score:
 # - Evalúa el balance entre precisión y recall
 # - positive = "1": La clase positiva es "1" (Pobre)
 F1_Score(y_pred = df_pred$Pobre_hat, y_true = df_pred$Pobre, positive = "1")
-```

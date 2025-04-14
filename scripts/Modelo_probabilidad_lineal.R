@@ -3,6 +3,21 @@
 #                                   Modelo de probabilidad lineal
 #
 #--------------------------------------------------------------------------------------------------------------#
+require(pacman)
+
+p_load(
+  tidyverse,
+  caret,
+  glmnet,
+  Metrics,
+  MLmetrics,
+  skimr,
+  xgboost,
+  biglm,
+  data.table
+)
+
+
 
 #Cargamos bases de datos 
 bd_train <- read.csv("data/bd_train_limpia.csv")
@@ -120,9 +135,30 @@ bayes <- 0.5
 pred_clases <- ifelse(pred_probs$Si >= bayes, "Si", "No")
 pred_clases <- factor(pred_clases, levels = c("No", "Si")) 
 
-#Calcula el F1 score
-eval_data <- data.frame(sub_test$Pobre, pred_clases)
-f1_val_set <- F1_Score(eval_data$sub_test.Pobre, eval_data$pred_clases, positive = "Si")
-cat("F1 Score: ", round(f1_val_set, 3), "\n")
+# 1. Extrae las predicciones del mejor modelo
+mejores_preds <- modelo_mpl$pred[
+  modelo_mpl$pred$alpha == modelo_mpl$bestTune$alpha & 
+    modelo_mpl$pred$lambda == modelo_mpl$bestTune$lambda, ]
 
+# 2. Matriz de confusión
+mejores_preds$pred <- factor(mejores_preds$pred, levels = c("No", "Si"))
+mejores_preds$obs <- factor(mejores_preds$obs, levels = c("No", "Si"))
+
+cm <- confusionMatrix(mejores_preds$pred, mejores_preds$obs, positive = "Si")
+
+# 3. Extraer métricas
+accuracy <- cm$overall["Accuracy"]
+precision <- cm$byClass["Precision"]
+recall <- cm$byClass["Recall"]
+f1 <- cm$byClass["F1"]
+
+# 4. Mostrar en tabla
+metricas <- data.frame(
+  Accuracy = round(accuracy, 3),
+  Precision = round(precision, 3),
+  Recall = round(recall, 3),
+  F1_Score = round(f1, 3)
+)
+
+print(metricas)
 
