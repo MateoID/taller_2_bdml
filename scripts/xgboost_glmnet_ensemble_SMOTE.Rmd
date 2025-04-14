@@ -1,0 +1,294 @@
+
+```{r}
+library(data.table)
+library(xgboost)
+library(Matrix)
+library(caret)
+library(glmnet)
+library(smotefamily)
+library(pROC)
+library(MLmetrics)
+
+# --- 1. CARGAR DATOS ---
+bd_train <- fread("../data/bd_train_limpia.csv")
+bd_test <- fread("../data/bd_test_limpia.csv")
+
+variables_modelo <- c("Pobre", "Cabecera", "Dominio", "num_room", "num_bed", "propiedad",
+                      "pago_amort", "renta_h", "renta_r", "Nper", "Depto", "suma_antiguedad", 
+                      "promedio_antiguedad", "tiene_empleado_publico", "tiene_patron", 
+                      "tiene_cuenta_propia", "tiene_emp_domestico", "tiene_jornalero", 
+                      "tiene_sin_remuneracion", "n_posiciones_lab_distintas", "aux_trans", 
+                      "ind_prima", "prima_serv", "prima_nav", "prima_vac", "ind_viaticos", 
+                      "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",                
+                      "max_educ", "hr_extr", "otro_tr", "rem_ext", "reg_cotiz", "cotiz_pen", 
+                      "ing_otros", "edad_prom", "perc_fem")
+
+bd_train$Pobre <- as.numeric(as.character(bd_train$Pobre))
+
+setDT(bd_train)
+setDT(bd_test)
+
+train <- bd_train[, ..variables_modelo]
+test <- bd_test[, .SD, .SDcols = setdiff(variables_modelo, "Pobre")]
+
+# --- 2. FEATURE ENGINEERING MEJORADO ---
+add_features <- function(data) {
+  data[, ing_total := renta_h + renta_r + ing_otros]
+  data[, ing_total_log := log1p(ing_total)]
+  data[, renta_per_capita := (renta_h + renta_r) / (Nper + 1)]
+  data[, ocupado_por_fem := ocupado * perc_fem]
+  data[, edad_prom_cuadrado := edad_prom^2]
+  data[, edad_prom_cubico := edad_prom^3]
+  data[, ing_per_capita := ing_total / (Nper + 1)]
+  data[, empleo_por_antig := n_posiciones_lab_distintas * promedio_antiguedad]
+  data[, renta_vs_educ := renta_h / (max_educ + 1)]
+  data[, edad_por_ocupado := edad_prom * ocupado]
+  data[, log_renta_h := log1p(renta_h)]
+  data[, sqrt_renta_r := sqrt(renta_r)]
+  data[, antiguedad_por_educ := promedio_antiguedad * max_educ]
+  data[, renta_por_habitacion := renta_h / (num_room + 1)]
+  data[, ratio_renta_otros := renta_h / (ing_otros + 1)]
+  data[, ratio_educ_antig := max_educ / (promedio_antiguedad + 1)]
+  data[, interaccion_ocupado_renta := ocupado * renta_h]
+  return(data)
+}
+
+train <- add_features(train)
+test <- add_features(test)
+
+# --- 3. CONVERTIR VARIABLES A FACTOR ---
+factor_cols <- c("Cabecera", "Dominio", "Depto", "propiedad", "pago_amort", 
+                 "tiene_empleado_publico", "tiene_patron", "tiene_cuenta_propia",
+                 "tiene_emp_domestico", "tiene_jornalero", "tiene_sin_remuneracion",
+                 "aux_trans", "ind_prima", "prima_serv", "prima_nav", "prima_vac",
+                 "ind_viaticos", "ocupado", "ind_oficio", "ind_arriendo", "pet_trabajo",
+                 "reg_cotiz", "cotiz_pen")
+
+for (col in factor_cols) {
+  if (col %in% names(train)) train[[col]] <- as.factor(train[[col]])
+  if (col %in% names(test)) test[[col]] <- as.factor(test[[col]])
+}
+
+# --- 4. MATRICES NUMÉRICAS ---
+train_matrix <- model.matrix(Pobre ~ . - 1, data = train)
+train_matrix <- as.matrix(train_matrix)
+train_labels <- train$Pobre
+
+test_matrix_raw <- model.matrix(~ . - 1, data = test)
+missing_cols <- setdiff(colnames(train_matrix), colnames(test_matrix_raw))
+for (col in missing_cols) {
+  test_matrix_raw <- cbind(test_matrix_raw, matrix(0, nrow = nrow(test_matrix_raw), ncol = 1, dimnames = list(NULL, col)))
+}
+test_matrix <- test_matrix_raw[, colnames(train_matrix)]
+
+# --- 5. PARÁMETROS OPTIMIZADOS DEL XGBOOST ---
+params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "aucpr",
+  eta = 0.05,  # Reducido para mayor precisión
+  max_depth = 8,  # Profundidad reducida para evitar overfitting
+  min_child_weight = 5,
+  colsample_bytree = 0.7,
+  subsample = 0.8,
+  gamma = 0.5,
+  lambda = 1.5,
+  alpha = 0.3,
+  max_delta_step = 1,
+  scale_pos_weight = sum(train_labels == 0) / sum(train_labels == 1)  # Balance de clases
+)
+
+# --- 6. FUNCIÓN F1 ---
+f1_score <- function(preds, labels) {
+  preds <- factor(preds, levels = c(0, 1))
+  labels <- factor(labels, levels = c(0, 1))
+  cm <- confusionMatrix(preds, labels, positive = "1")
+  cm$byClass["F1"]
+}
+
+# --- 7. VALIDACIÓN CRUZADA CON 3 FOLDS ---
+set.seed(123)
+folds <- createFolds(train_labels, k = 3, list = TRUE, returnTrain = FALSE)
+thresholds <- seq(0.1, 0.9, by = 0.01)
+oof_preds <- rep(NA, length(train_labels))
+best_models <- list()
+
+for (i in seq_along(folds)) {
+  cat(sprintf("Fold %d...\n", i))
+  idx_valid <- folds[[i]]
+  idx_train <- setdiff(seq_along(train_labels), idx_valid)
+  
+  X_train <- train_matrix[idx_train, ]
+  y_train <- train_labels[idx_train]
+  X_valid <- train_matrix[idx_valid, ]
+  y_valid <- train_labels[idx_valid]
+  
+  # 7.1 SMOTE con ajuste de parámetros
+  df_smote_fold <- as.data.frame(X_train)
+  df_smote_fold$class <- as.factor(ifelse(y_train == 1, "yes", "no"))
+  
+  smote_out <- tryCatch({
+    SMOTE(X = df_smote_fold[, -ncol(df_smote_fold)], 
+          target = df_smote_fold$class, 
+          K = 3,  # Reducir vecinos para SMOTE
+          dup_size = 3)  # Aumentar muestras para clase minoritaria
+  }, error = function(e) {
+    warning("SMOTE falló en el fold ", i, " - usando datos originales.")
+    list(data = df_smote_fold)
+  })
+  
+  X_train_smote <- as.matrix(smote_out$data[, -ncol(smote_out$data)])
+  y_train_smote <- as.numeric(smote_out$data$class == "yes")
+  
+  # 7.2 Entrenar XGBoost con early stopping
+  dtrain_fold <- xgb.DMatrix(data = X_train_smote, label = y_train_smote)
+  dvalid_fold <- xgb.DMatrix(data = X_valid, label = y_valid)
+  
+  watchlist <- list(train = dtrain_fold, eval = dvalid_fold)
+  
+  model_xgb <- xgb.train(
+    params = params,
+    data = dtrain_fold,
+    nrounds = 500,
+    early_stopping_rounds = 50,
+    watchlist = watchlist,
+    verbose = 0,
+    maximize = TRUE
+  )
+  
+  # 7.3 Entrenar GLMNET con parámetros ajustados
+  model_glmnet <- cv.glmnet(
+    x = X_train_smote,
+    y = y_train_smote,
+    family = "binomial",
+    alpha = 0.2,  # Más cerca de ridge para estabilidad
+    type.measure = "auc",
+    nfolds = 5,
+    parallel = TRUE
+  )
+  
+  # 7.4 Predicciones
+  pred_xgb <- predict(model_xgb, X_valid)
+  pred_glmnet <- predict(model_glmnet, X_valid, type = "response", s = "lambda.min")
+  
+  # 7.5 Optimizar pesos del ensemble
+  weights <- seq(0.1, 0.9, by = 0.1)
+  best_f1 <- 0
+  best_w <- 0.7
+  
+  for (w in weights) {
+    ensemble_pred <- w * pred_xgb + (1-w) * as.numeric(pred_glmnet)
+    f1s_fold <- sapply(thresholds, function(th) {
+      preds <- ifelse(ensemble_pred > th, 1, 0)
+      f1_score(preds, y_valid)
+    })
+    current_max <- max(f1s_fold)
+    
+    if (current_max > best_f1) {
+      best_f1 <- current_max
+      best_w <- w
+    }
+  }
+  
+  # 7.6 Usar mejor peso encontrado
+  ensemble_pred <- best_w * pred_xgb + (1-best_w) * as.numeric(pred_glmnet)
+  
+  f1s_fold <- sapply(thresholds, function(th) {
+    preds <- ifelse(ensemble_pred > th, 1, 0)
+    f1_score(preds, y_valid)
+  })
+  
+  best_th_fold <- thresholds[which.max(f1s_fold)]
+  oof_preds[idx_valid] <- ifelse(ensemble_pred > best_th_fold, 1, 0)
+  
+  # 7.7 Guardar modelos del fold
+  best_models[[i]] <- list(
+    xgb = model_xgb,
+    glmnet = model_glmnet,
+    weight = best_w,
+    threshold = best_th_fold
+  )
+}
+
+# 7.8 Calcular métricas OOF
+f1_oof <- f1_score(oof_preds, train_labels)
+cat(sprintf("\nF1 Score OUT-OF-FOLD (validación real): %.4f\n", f1_oof))
+
+# --- 8. ENTRENAMIENTO FINAL CON TODO EL DATASET Y SMOTE ---
+df_smote <- as.data.frame(train_matrix)
+df_smote$class <- as.factor(ifelse(train_labels == 1, "yes", "no"))
+
+smote_out <- SMOTE(X = df_smote[, -ncol(df_smote)], 
+                   target = df_smote$class, 
+                   K = 3,
+                   dup_size = 4)
+
+train_matrix_smote <- as.matrix(smote_out$data[, -ncol(smote_out$data)])
+train_labels_smote <- as.numeric(smote_out$data$class == "yes")
+
+# 8.1 Entrenar modelos finales
+dtrain <- xgb.DMatrix(data = train_matrix_smote, label = train_labels_smote)
+dtest <- xgb.DMatrix(data = test_matrix)
+
+final_xgb <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 500,
+  early_stopping_rounds = 50,
+  watchlist = list(train = dtrain),
+  verbose = 1,
+  maximize = TRUE
+)
+
+final_glmnet <- cv.glmnet(
+  x = train_matrix_smote,
+  y = train_labels_smote,
+  family = "binomial",
+  alpha = 0.2,
+  type.measure = "auc",
+  nfolds = 5,
+  parallel = TRUE
+)
+
+# 8.2 Optimizar threshold final
+xgb_probs_train <- predict(final_xgb, dtrain)
+glmnet_probs_train <- predict(final_glmnet, train_matrix_smote, type = "response", s = "lambda.min")
+
+# 8.3Promediar los pesos de los folds para el ensemble final
+avg_weight <- mean(sapply(best_models, function(x) x$weight))
+ensemble_probs_train <- avg_weight * xgb_probs_train + (1-avg_weight) * as.numeric(glmnet_probs_train)
+
+f1s_ensemble <- sapply(thresholds, function(th) {
+  preds <- ifelse(ensemble_probs_train > th, 1, 0)
+  f1_score(preds, train_labels_smote)
+})
+
+best_threshold <- thresholds[which.max(f1s_ensemble)]
+best_f1 <- max(f1s_ensemble)
+
+# --- 9. PREDICCIÓN FINAL ---
+xgb_probs_test <- predict(final_xgb, dtest)
+glmnet_probs_test <- predict(final_glmnet, test_matrix, type = "response", s = "lambda.min")
+ensemble_probs_test <- avg_weight * xgb_probs_test + (1-avg_weight) * as.numeric(glmnet_probs_test)
+
+pred_labels <- ifelse(ensemble_probs_test > best_threshold, 1, 0)
+
+# --- 10. GUARDAR RESULTADOS ---
+df_pred <- bd_test[, .(id)]
+df_pred$Pobre <- pred_labels
+fwrite(df_pred, "../results/predictions/xgboost_glmnet_ensemble_SMOTE_v2.csv")
+
+# --- 11. IMPORTANCIA DE VARIABLES ---
+importance_matrix <- xgb.importance(model = final_xgb)
+print(importance_matrix[1:20, ])
+
+# --- 12. RESULTADOS FINALES ---
+cat("\n--- RESULTADOS FINALES ---\n")
+cat(sprintf("F1 Score en SMOTE-entrenamiento (Ensemble): %.4f\n", best_f1))
+cat(sprintf("Umbral óptimo utilizado: %.2f\n", best_threshold))
+cat(sprintf("F1 Score OUT-OF-FOLD (real): %.4f\n", f1_oof))
+cat(sprintf("Peso promedio del ensemble: %.2f\n", avg_weight))
+
+
+```
+
