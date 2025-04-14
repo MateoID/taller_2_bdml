@@ -19,7 +19,7 @@ p_load(
 Carga de datos y joints
 
 ```{r}
-raw_data_path <- '../raw_data'
+raw_data_path <- '../data'
 
 # Datos training
 hogares_tr <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
