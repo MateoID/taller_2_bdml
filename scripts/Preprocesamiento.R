@@ -1,6 +1,8 @@
+
+
+#Configuración inicial
 rm(list = ls())
 cat("\f")
-setwd("C:/Users/mc-c2/OneDrive - Universidad de los andes/Universidad/MECA/Big Data y Machine Learning/Problem Sets/Ejercicios")
 
 
 #configuracion de paquetes
@@ -20,12 +22,14 @@ p_load(
 
 #Cargamos los datos 
 # Datos training
-hogares_tr <- read.csv('train_hogares.csv')
-personas_tr <- read.csv('train_personas.csv')
+raw_data_path <- '../data'
+hogares_tr <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
+personas_tr <- read.csv(file.path(raw_data_path, 'train_personas.csv'))
 
 # Datos test
-hogares_te <- read.csv('test_hogares.csv')
-personas_te <- read.csv('test_personas.csv')
+hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
+personas_te <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
+
 
 #Preprocesamiento total 
 
