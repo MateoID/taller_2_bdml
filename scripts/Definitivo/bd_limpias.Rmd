@@ -1,0 +1,411 @@
+---
+title: "script_pred_CamiMateo"
+output: html_document
+date: "2025-04-03"
+---
+
+```{r}
+require(pacman)
+
+p_load(
+  tidyverse,
+  caret,
+  glmnet,
+  Metrics,
+  skimr,
+  ranger, 
+  caret,
+  data.table,
+  xgboost
+  )
+
+```
+
+## Carga de datos y joints
+
+```{r}
+raw_data_path <- '../data'
+
+# Datos training
+hogares_tr <- read.csv(file.path(raw_data_path, 'train_hogares.csv'))
+personas_train <- read.csv(file.path(raw_data_path, 'train_personas.csv'))
+ 
+# Datos test
+hogares_te <- read.csv(file.path(raw_data_path, 'test_hogares.csv'))
+personas_test <- read.csv(file.path(raw_data_path, 'test_personas.csv'))
+```
+
+Limpieza y agrupación de datos para personas train
+```{r}
+personas_tr <- personas_train %>%
+  select(
+    "id",
+    "Clase",
+    "P6020",
+    "P6040",
+    "P6100",
+    "P6210",
+    "P6426",
+    "P6430",
+    "P6510",
+    "P6545",
+    "P6585s2",
+    "P6630s1",
+    "P6630s2",
+    "P6630s3",
+    "P6630s4",
+    "P6920",
+    "P7040",
+    "P7495",
+    "P7500s2",
+    "P7505",
+    "P7510s7",
+    "Oc",
+    "Oficio"
+  )
+
+cols_cero <- c(
+  "P6100",
+  "P6426",
+  "P6430",
+  "P6510",
+  "P6585s2",
+  "P6630s1",
+  "P6630s2",
+  "P6630s3",
+  "P6630s4",
+  "P7040",
+  "P7505",
+  "P7500s2",
+  "P7510s7",
+  "Oc"
+  )
+
+# Ajuste de variables categoricas para llenar NA con valores correspondientes
+personas_tr <- personas_tr %>%
+  mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(
+    pet_nueva = case_when(
+      Clase == 1 & P6040 >= 12 ~ 1,
+      Clase == 2 & P6040 >= 10 ~ 1,
+      TRUE ~ 0
+    )) %>%
+  mutate(reg_cotiz = if_else(P6100 %in% c(1, 2), 1, 0)) %>%
+  mutate(P6210 = replace_na(P6210, 9)) %>%
+  mutate(educ = case_when(
+    P6210 < 5 | P6210 == 9 ~ 0,
+    P6210 == 5 ~ 1,
+    P6210 == 6 ~ 2
+  )) %>%
+  mutate(P6510 = ifelse(P6510==1, 1, 0)) %>%
+  mutate(P6585s2 = ifelse(P6585s2==1, 1, 0)) %>%
+  mutate(P6630s1 = ifelse(P6630s1==1, 1, 0)) %>%
+  mutate(P6630s2 = ifelse(P6630s2==1, 1, 0)) %>%
+  mutate(P6630s3 = ifelse(P6630s3==1, 1, 0)) %>%
+  mutate(P6630s4 = ifelse(P6630s4==1, 1, 0)) %>%
+  mutate(P6920 = replace_na(P6920, 2)) %>%
+  mutate(P7040 = ifelse(P7040==1, 1, 0)) %>%
+  mutate(P7505 = ifelse(P7505==1, 1, 0)) %>%
+  mutate(P7500s2 = ifelse(P7500s2==1, 1, 0))
+
+# Agregación de valores para volver la bd de personas compatible con la de hogares
+personas_tr <- personas_tr %>%
+  group_by(id) %>%
+  summarise(
+    n_fem = sum(P6020==2, na.rm = TRUE),
+    # Suma de edad de miembros para luego dividirla entre Nper de hogar y sacar promedio
+    edad_total = sum(P6040),
+    # Calculo de promedio de antigüedad entre los miembros del hogar con valores > 0.
+    suma_antiguedad = sum(P6426[P6426 > 0]),
+    num_miembros = sum(P6426 > 0),
+    promedio_antiguedad = ifelse(num_miembros > 0, suma_antiguedad / num_miembros, NA),
+    tiene_empleado_publico = as.numeric(any(P6430 == 2)),
+    tiene_patron = as.numeric(any(P6430 == 5)),
+    tiene_cuenta_propia = as.numeric(any(P6430 == 4)),
+    tiene_emp_domestico = as.numeric(any(P6430 == 3)),
+    tiene_jornalero = as.numeric(any(P6430 == 8)),
+    tiene_sin_remuneracion = as.numeric(any(P6430 %in% c(6, 7))),
+    n_posiciones_lab_distintas = n_distinct(P6430),
+    aux_trans = ifelse(sum(P6585s2) > 0, 1, 0),
+    ind_prima = as.integer(any(P6545 == 1, na.rm = TRUE)),
+    prima_serv = as.integer(any(P6630s1 == 1, na.rm = TRUE)),
+    prima_nav = as.integer(any(P6630s2 == 1, na.rm = TRUE)),
+    prima_vac = as.integer(any(P6630s3 == 1, na.rm = TRUE)),
+    ind_viaticos = as.integer(any(P6630s4 == 1, na.rm = TRUE)), 
+    pension = as.integer(any(P7500s2 == 1, na.rm = TRUE)),
+    ocupado = as.integer(any(Oc == 1, na.rm = TRUE)),
+    ind_oficio = as.integer(any(Oficio %in% c(2,4,6,9,12,20,21), na.rm = TRUE)),
+    #Indicador de arriendo
+    ind_arriendo = as.integer(any(P7495 == 1, na.rm = TRUE)),
+    pet_trabajo = sum(pet_nueva, na.rm = TRUE),
+    max_educ = max(educ),
+    hr_extr = as.integer(any(P6510 == 1, na.rm = TRUE)),
+    otro_tr = as.integer(any(P7040 == 1, na.rm = TRUE)),
+    rem_ext = as.integer(any(P7510s7 == 1, na.rm = TRUE)),
+    reg_cotiz = as.integer(any(reg_cotiz == 1, na.rm = TRUE)),
+    cotiz_pen = as.integer(any(P6920 == 1, na.rm = TRUE)),
+    ing_otros = as.integer(any(P7505 == 1, na.rm = TRUE))
+    ) %>%
+  mutate(across(starts_with("tiene_"), ~replace_na(., 0)))
+```
+
+Limpieza y agrupación de datos para personas test
+```{r}
+personas_te <- personas_test %>%
+  select(
+    "id",
+    "Clase",
+    "P6020",
+    "P6040",
+    "P6100",
+    "P6210",
+    "P6426",
+    "P6430",
+    "P6510",
+    "P6545",
+    "P6585s2",
+    "P6630s1",
+    "P6630s2",
+    "P6630s3",
+    "P6630s4",
+    "P6920",
+    "P7040",
+    "P7495",
+    "P7500s2",
+    "P7505",
+    "P7510s7",
+    "Oc",
+    "Oficio"
+  )
+
+cols_cero <- c(
+  "P6100",
+  "P6426",
+  "P6430",
+  "P6510",
+  "P6585s2",
+  "P6630s1",
+  "P6630s2",
+  "P6630s3",
+  "P6630s4",
+  "P7040",
+  "P7505",
+  "P7500s2",
+  "P7510s7",
+  "Oc"
+  )
+
+# Ajuste de variables categoricas para llenar NA con valores correspondientes
+personas_te <- personas_te %>%
+  mutate(across(all_of(cols_cero), ~ replace_na(., 0))) %>%
+  mutate(
+    pet_nueva = case_when(
+      Clase == 1 & P6040 >= 12 ~ 1,
+      Clase == 2 & P6040 >= 10 ~ 1,
+      TRUE ~ 0
+    )) %>%
+  mutate(reg_cotiz = if_else(P6100 %in% c(1, 2), 1, 0)) %>%
+  mutate(P6210 = replace_na(P6210, 9)) %>%
+  mutate(educ = case_when(
+    P6210 < 5 | P6210 == 9 ~ 0,
+    P6210 == 5 ~ 1,
+    P6210 == 6 ~ 2
+  )) %>%
+  mutate(P6510 = ifelse(P6510==1, 1, 0)) %>%
+  mutate(P6585s2 = ifelse(P6585s2==1, 1, 0)) %>%
+  mutate(P6630s1 = ifelse(P6630s1==1, 1, 0)) %>%
+  mutate(P6630s2 = ifelse(P6630s2==1, 1, 0)) %>%
+  mutate(P6630s3 = ifelse(P6630s3==1, 1, 0)) %>%
+  mutate(P6630s4 = ifelse(P6630s4==1, 1, 0)) %>%
+  mutate(P6920 = replace_na(P6920, 2)) %>%
+  mutate(P7040 = ifelse(P7040==1, 1, 0)) %>%
+  mutate(P7505 = ifelse(P7505==1, 1, 0)) %>%
+  mutate(P7500s2 = ifelse(P7500s2==1, 1, 0))
+
+# Agregación de valores para volver la bd de personas compatible con la de hogares
+personas_te <- personas_te %>%
+  group_by(id) %>%
+  summarise(
+    n_fem = sum(P6020==2, na.rm = TRUE),
+    # Suma de edad de miembros para luego dividirla entre Nper de hogar y sacar promedio
+    edad_total = sum(P6040),
+    # Calculo de promedio de antigüedad entre los miembros del hogar con valores > 0.
+    suma_antiguedad = sum(P6426[P6426 > 0]),
+    num_miembros = sum(P6426 > 0),
+    promedio_antiguedad = ifelse(num_miembros > 0, suma_antiguedad / num_miembros, NA),
+    tiene_empleado_publico = as.numeric(any(P6430 == 2)),
+    tiene_patron = as.numeric(any(P6430 == 5)),
+    tiene_cuenta_propia = as.numeric(any(P6430 == 4)),
+    tiene_emp_domestico = as.numeric(any(P6430 == 3)),
+    tiene_jornalero = as.numeric(any(P6430 == 8)),
+    tiene_sin_remuneracion = as.numeric(any(P6430 %in% c(6, 7))),
+    n_posiciones_lab_distintas = n_distinct(P6430),
+    aux_trans = ifelse(sum(P6585s2) > 0, 1, 0),
+    ind_prima = as.integer(any(P6545 == 1, na.rm = TRUE)),
+    prima_serv = as.integer(any(P6630s1 == 1, na.rm = TRUE)),
+    prima_nav = as.integer(any(P6630s2 == 1, na.rm = TRUE)),
+    prima_vac = as.integer(any(P6630s3 == 1, na.rm = TRUE)),
+    ind_viaticos = as.integer(any(P6630s4 == 1, na.rm = TRUE)), 
+    pension = as.integer(any(P7500s2 == 1, na.rm = TRUE)),
+    ocupado = as.integer(any(Oc == 1, na.rm = TRUE)),
+    ind_oficio = as.integer(any(Oficio %in% c(2,4,6,9,12,20,21), na.rm = TRUE)),
+    #Indicador de arriendo
+    ind_arriendo = as.integer(any(P7495 == 1, na.rm = TRUE)),
+    pet_trabajo = sum(pet_nueva, na.rm = TRUE),
+    max_educ = max(educ),
+    hr_extr = as.integer(any(P6510 == 1, na.rm = TRUE)),
+    otro_tr = as.integer(any(P7040 == 1, na.rm = TRUE)),
+    rem_ext = as.integer(any(P7510s7 == 1, na.rm = TRUE)),
+    reg_cotiz = as.integer(any(reg_cotiz == 1, na.rm = TRUE)),
+    cotiz_pen = as.integer(any(P6920 == 1, na.rm = TRUE)),
+    ing_otros = as.integer(any(P7505 == 1, na.rm = TRUE))
+    ) %>%
+  mutate(across(starts_with("tiene_"), ~replace_na(., 0)))
+```
+
+```{r}
+
+    #posicion_lab_dominante = {
+     # tab <- sort(table(P6430), decreasing = TRUE, na.last = TRUE)
+      #as.numeric(names(tab)[1])
+    #}
+    
+```
+
+
+```{r}
+# Tabla test
+bd_train <- hogares_tr %>%
+  left_join(personas_tr, join_by("id"))
+
+# Tabla test
+bd_test <-hogares_te %>%
+  left_join(personas_te, join_by("id"))
+```
+
+
+```{r}
+col_na_count <- sapply(bd_train, function(x) sum(is.na(x)))
+
+# Mostrar las columnas que tienen al menos un NA
+col_na_count[col_na_count > 0]
+```
+
+
+```{r}
+# Limpieza bd consolidada hogares train
+cols_cero_hogar <- c(
+  "promedio_antiguedad",    
+  "P5100", # Valor de la cuota de amortización
+  "P5130", # Estimación del valor de habitar la vivienda en caso de ser arrendada
+  "P5140" # Valor del arriendo
+)
+
+bd_train <- bd_train %>%
+  mutate(edad_prom = edad_total/Nper) %>%
+  mutate(perc_fem = (n_fem/Nper)*100) %>% #genera la proporcion de mujeres por hogar,
+  mutate(across(all_of(cols_cero_hogar), ~ replace_na(., 0))) %>%
+  select(-c(
+    n_fem,
+    Npersug, 
+    Ingtotugarr, 
+    Ingpcug, 
+    Li, 
+    Indigente,
+    Npobres, 
+    Nindigentes, 
+    Fex_c, 
+    Fex_dpto, 
+    edad_total,
+    num_miembros
+    ))
+
+cols_factor <- c(
+  "Clase",
+  "Dominio",
+  "P5090",
+  "Pobre",               
+  "Depto",
+  "tiene_empleado_publico",
+  "tiene_patron",
+  "tiene_cuenta_propia",
+  "tiene_emp_domestico",
+  "tiene_jornalero",
+  "tiene_sin_remuneracion",
+  "aux_trans", 
+  "ind_prima",
+  "prima_serv",
+  "prima_nav",
+  "prima_vac", 
+  "ind_viaticos",
+  "pension",             
+  "ocupado",
+  "ind_oficio",
+  "ind_arriendo",
+  "max_educ",
+  "hr_extr",
+  "otro_tr",
+  "rem_ext",
+  "reg_cotiz",
+  "cotiz_pen",
+  "ing_otros"
+)
+
+bd_train <- bd_train %>%
+  mutate(across(cols_factor, as.factor))
+
+
+#Formato variables de entrenamiento 
+bd_train <- bd_train %>% 
+  rename(
+    num_room = P5000,   
+    num_bed = P5010, 
+    propiedad = P5090, 
+    pago_amort = P5100,
+    renta_h = P5130,
+    renta_r = P5140,
+    Cabecera = Clase
+)
+
+# Limpieza bd consolidada hogares test
+bd_test <- bd_test %>%
+   mutate(edad_prom = edad_total/Nper) %>%
+  mutate(perc_fem = (n_fem/Nper)*100) %>% #genera la proporcion de mujeres por hogar,
+  mutate(across(all_of(cols_cero_hogar), ~ replace_na(., 0))) %>%
+  select(-c(
+    n_fem,
+    Npersug, 
+    Li, 
+    Fex_c, 
+    Fex_dpto, 
+    edad_total,
+    num_miembros
+    ))
+
+cols_factor_test <- setdiff(cols_factor, "Pobre")
+
+bd_test <- bd_test %>%
+  mutate(across(cols_factor_test, as.factor))
+
+#Formato de variables de test 
+
+bd_test <- bd_test %>% 
+  rename(
+    num_room = P5000,   
+    num_bed = P5010, 
+    propiedad = P5090, 
+    pago_amort = P5100,
+    renta_h = P5130,
+    renta_r = P5140,
+    Cabecera = Clase
+)
+
+#Guardar datos finales para evaluación de modelos 
+write.csv(bd_train, file = "../data/bd_train_limpia.csv", row.names = FALSE)
+write.csv(bd_test, file = "../data/bd_test_limpia.csv", row.names = FALSE)
+
+getwd()
+```
+
+
+
