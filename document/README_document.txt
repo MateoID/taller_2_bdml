@@ -1,1 +1,0 @@
-Esta carpeta debe tener el documento final del taller

@@ -1,0 +1,142 @@
+wd(---
+title: "Untitled"
+author: "Javier Amaya Nieto"
+date: "2025-04-14"
+output: html_document
+---
+
+```{r}
+library(knitr)
+library(kableExtra)
+library(xtable)
+library(dplyr)
+library(stargazer)
+
+```
+
+
+```{r}
+
+#Cargamos bases de datos 
+raw_data_path <- '../data'
+table_results_path <- '../results/tables'
+
+# Datos 
+bd_train <- read.csv(file.path(raw_data_path, 'bd_train_limpia.csv'))
+
+# Tabla 1
+bd_continuas <- bd_train %>% 
+  mutate(pago_amort = pago_amort/1000,
+         renta_h = renta_h/1000,
+         renta_r = renta_r/1000) %>% 
+  select(
+    "Ingtotug",
+    "Nper", 
+    "num_room",
+    "num_bed",    
+    "pago_amort",                 
+    "renta_h",
+    "renta_r",
+    "suma_antiguedad", 
+    "promedio_antiguedad",
+    "edad_prom",                  
+    "perc_fem"                  
+  )
+
+stargazer(bd_continuas,
+          type = "latex",
+          title = "Estadísticas descriptivas para variables continuas", 
+          align = TRUE,
+          no.space = TRUE,
+          nobs = FALSE,
+          median = TRUE,
+          covariate.labels = c(
+            'Ingreso hogar',
+            'No. de personas',
+            'No. Habitaciones',
+            'No. Dormitorios',
+            'Crédito vivienda',
+            'Valor arriendo',
+            'Arriendo estim.',
+            'Antigüedad laboral',
+            'Promedio de antigüedad',
+            'Media de edad',
+            'Proporción de mujeres'
+          ),
+          notes = c(
+            "Número de observaciones: 16,542 para todas las variables. Nuestra variable explicada \\\\",
+            "es 'Pobre': dicótoma que toma valor de 1 para hogares con ingresos promedio por debajo \\\\",
+            "de la línea de pobreza y 0 de lo contrario. Las variables de 'Crédito vivienda', 'Valor \\\\",
+            "arriendo' y 'Arriendo estim.' se encuentran en miles de pesos."
+          ),
+          notes.append = FALSE,
+          out = file.path(table_results_path, "2_1_tabla_estadisticas_descriptivas_continuas.tex")
+          )
+```
+
+
+```{r}
+bd_categoricas <- bd_train %>%
+  select(-c(
+    "Ingtotug",
+    "Nper", 
+    "num_room",
+    "num_bed",    
+    "pago_amort",                 
+    "renta_h",
+    "renta_r",
+    "suma_antiguedad", 
+    "promedio_antiguedad",
+    "edad_prom",                  
+    "perc_fem",
+    "pet_trabajo",
+    "n_posiciones_lab_distintas",
+    "Lp",
+    "id",
+    "Dominio",
+    "Depto")
+  )
+
+tabla_descriptiva <- data.frame()
+
+for (var in names(bd_categoricas)) {
+  temp <- bd_categoricas %>%
+    group_by(across(all_of(var))) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    mutate(porcentaje = round(n / sum(n) * 100, 1),
+           variable = var) %>%
+    rename(categoria = !!sym(var)) %>%
+    select(variable, categoria, n, porcentaje)
+  
+  tabla_descriptiva <- bind_rows(tabla_descriptiva, temp)
+}
+
+print(tabla_descriptiva)
+```
+
+```{r}
+
+
+tabla_descriptiva %>%
+  kable(format = "latex", booktabs = TRUE, caption = "Estadísticas descriptivas para variables categóricas") %>%
+  kable_styling(latex_options = c("hold_position"))
+
+# Convertí a formato LaTeX con xtable
+tabla_tex <- xtable(tabla_descriptiva, 
+                    caption = "Tabla de Estadísticas Descriptivas", 
+                    label = "tab:descriptiva")
+
+
+
+##########RUTA PARA RESULTS...
+ruta_salida <- file.path(table_results_path, "tabla_descriptiva.tex")
+
+
+
+
+print(tabla_tex, 
+      file = ruta_salida, 
+      include.rownames = FALSE,
+      booktabs = TRUE)
+```
+

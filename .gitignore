@@ -2,7 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
-raw_data/*.csv
+
 
 
 ### macOS ###
@@ -39,5 +39,6 @@ Temporary Items
 *.icloud
 
 # ignorando la data del proyecto
-data/*.csv
 scripts/Demostration zoom up in grids.R
+data/train_hogares.csv
+data/train_personas.csv
