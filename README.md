@@ -50,6 +50,7 @@ taller_2_bdml/
 ├── scripts
 │   ├──master.R
 │   ├──Preprocesamiento.Rmd
+│   ├──Descriptive.Rmd
 │   ├──Modelo_probabilidad_lineal.R
 │   ├──Regresion_lineal_enet.Rmd
 │   ├──Logisitic_regression.Rmd
