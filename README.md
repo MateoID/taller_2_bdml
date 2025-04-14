@@ -48,7 +48,7 @@ taller_2_bdml/
 ├── document
 │   ├── Documento_predict_poverty.pdf
 ├── scripts
-│   ├──master.R
+│   ├──Runall_predict_poverty.R
 │   ├──Preprocesamiento.Rmd
 │   ├──Descriptive.Rmd
 │   ├──Modelo_probabilidad_lineal.R
